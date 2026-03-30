@@ -48,6 +48,48 @@ def get_connection():
 
 
 # ──────────────────────────────────────────────────────────────
+# SCHEMA MIGRATION
+# ──────────────────────────────────────────────────────────────
+
+def update_database_schema():
+    """Safely adds missing verification columns to the users table."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Safely add email_verified (BIT) - note we do not set DEFAULT 0 WITH VALUES 
+        # so old legacy accounts stay NULL, but we will deal with that in login.
+        cursor.execute("""
+            IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'email_verified')
+            BEGIN
+                ALTER TABLE dbo.users ADD email_verified BIT DEFAULT 0;
+            END
+        """)
+
+        # Safely add verification_code (NVARCHAR)
+        cursor.execute("""
+            IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'verification_code')
+            BEGIN
+                ALTER TABLE dbo.users ADD verification_code NVARCHAR(10) NULL;
+            END
+        """)
+
+        # Safely add verification_expiry (DATETIME)
+        cursor.execute("""
+            IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'verification_expiry')
+            BEGIN
+                ALTER TABLE dbo.users ADD verification_expiry DATETIME NULL;
+            END
+        """)
+
+        conn.commit()
+        conn.close()
+        print("Database schema verified/updated successfully.")
+    except Exception as e:
+        print(f"Error updating schema: {e}")
+
+
+# ──────────────────────────────────────────────────────────────
 # TEST — Run this file directly to check your connection
 # ──────────────────────────────────────────────────────────────
 

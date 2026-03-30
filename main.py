@@ -75,5 +75,8 @@ class SignDeskApp(ctk.CTk):
         self.geometry(f"{width}x{height}+{x}+{y}")
 
 if __name__ == "__main__":
+    from core.database import update_database_schema
+    update_database_schema()
+    
     app = SignDeskApp()
     app.mainloop()

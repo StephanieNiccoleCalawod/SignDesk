@@ -11,12 +11,13 @@ from core.theme import *
 from core.ui_helpers import make_left_panel, make_field, make_primary_button, make_ghost_button
 from core.email_service import (
     generate_otp, get_otp_expiry, is_otp_expired,
-    send_verification_email, ResendTracker
+    send_verification_email, ResendTracker, VerificationAttemptTracker
 )
 from core.email_config import OTP_RESEND_COOLDOWN
 from modules.auth.service import (
     login_user, register_user, validate_password,
-    validate_registration, check_duplicate_username, check_duplicate_email
+    validate_registration, check_duplicate_username, check_duplicate_email,
+    verify_user, resend_verification_code
 )
 
 
@@ -222,30 +223,35 @@ class RegisterPage(ctk.CTkFrame):
 
         # Step 4: Generate OTP and send email (in a background thread to avoid UI freeze)
         self._submit_btn.configure(state="disabled", text="Sending code...")
-        self._status_label.configure(text="📧  Sending verification code to your email...",
+        self._status_label.configure(text="Sending verification code to your email...",
                                       text_color=C_ACCENT)
 
-        otp_code = generate_otp()
-        otp_expiry = get_otp_expiry()
-
-        # Store pending registration data
+        # Store basic data
         pending_data = {
             "username": username,
             "email": email,
-            "password": password,
-            "otp_code": otp_code,
-            "otp_expiry": otp_expiry,
+            "password": password
         }
 
         # Send email in background thread
-        def send_email_task():
-            success, msg = send_verification_email(email, otp_code)
+        def bg_task():
+            # 1. Register unverified user in DB
+            success, msg, otp_code = register_user(username, email, password)
+            if not success:
+                self.after(0, lambda: self._on_register_fail(msg))
+                return
+                
+            # 2. Send email
+            email_success, email_msg = send_verification_email(email, otp_code)
+            self.after(0, lambda: self._on_email_sent(email_success, email_msg, pending_data))
 
-            # Update UI from main thread
-            self.after(0, lambda: self._on_email_sent(success, msg, pending_data))
-
-        thread = threading.Thread(target=send_email_task, daemon=True)
+        thread = threading.Thread(target=bg_task, daemon=True)
         thread.start()
+
+    def _on_register_fail(self, message: str):
+        self._submit_btn.configure(state="normal", text="Create Account")
+        self._status_label.configure(text=message, text_color=C_ERROR_RED)
+        messagebox.showerror("Registration Error", message)
 
     def _on_email_sent(self, success: bool, message: str, pending_data: dict):
         """Callback after email sending attempt completes."""
@@ -253,20 +259,13 @@ class RegisterPage(ctk.CTkFrame):
 
         if success:
             self._status_label.configure(text="")
-
-            # FALLBACK MODE: email not configured — show code on screen
-            if message == "FALLBACK":
-                messagebox.showinfo(
-                    "Verification Code",
-                    f"Your verification code is:\n\n"
-                    f"   {pending_data['otp_code']}\n\n"
-                    f"Please enter this code on the next screen."
-                )
-
             # Navigate to verification page — account NOT created yet
             self._app.show_verification(pending_data)
         else:
-            self._status_label.configure(text="", text_color=C_ERROR_RED)
+            self._status_label.configure(
+                text="Failed to send verification email. Please check your email and try again.",
+                text_color=C_ERROR_RED
+            )
             messagebox.showerror("Email Error", message)
 
 
@@ -286,6 +285,7 @@ class VerificationPage(ctk.CTkFrame):
         self._pending = pending_data
         self._resend_tracker = ResendTracker()
         self._resend_tracker.record_resend()  # Count the initial send
+        self._attempt_tracker = VerificationAttemptTracker()
         self._cooldown_job = None
         self._build()
         self._start_cooldown_timer()
@@ -392,49 +392,45 @@ class VerificationPage(ctk.CTkFrame):
         entered_code = self._otp_entry.get().strip()
 
         if not entered_code:
-            self._status_label.configure(text="⚠  Please enter the verification code.",
+            self._status_label.configure(text="Please enter the verification code.",
                                           text_color=C_WARN)
             return
 
         if len(entered_code) != 6 or not entered_code.isdigit():
-            self._status_label.configure(text="⚠  Code must be exactly 6 digits.",
+            self._status_label.configure(text=" Code must be exactly 6 digits.",
                                           text_color=C_WARN)
             return
 
-        # Check expiry
-        if is_otp_expired(self._pending["otp_expiry"]):
-            self._status_label.configure(
-                text="❌  Verification code has expired. Please request a new one.",
-                text_color=C_ERROR_RED
-            )
+        # Check if max attempts exceeded (brute-force protection)
+        can_try, reason = self._attempt_tracker.can_attempt()
+        if not can_try:
+            self._status_label.configure(text=f"{reason}", text_color=C_ERROR_RED)
+            self._verify_btn.configure(state="disabled")
+            messagebox.showerror("Verification Locked", reason)
+            self._on_back()
             return
 
-        # Check code
-        if entered_code != self._pending["otp_code"]:
-            self._status_label.configure(
-                text="❌  Incorrect verification code. Please try again.",
-                text_color=C_ERROR_RED
-            )
-            self._otp_entry.delete(0, "end")
-            return
+        # Contact DB to verify code
+        self._verify_btn.configure(state="disabled", text="Verifying code...")
+        self._status_label.configure(text="  Verifying code...", text_color=C_ACCENT)
+        
+        def run_verify():
+            result_ok, msg = verify_user(self._pending["email"], entered_code)
+            self.after(0, lambda: self._on_verify_result(result_ok, msg))
+            
+        threading.Thread(target=run_verify, daemon=True).start()
 
-        # ── CODE IS CORRECT — Create the account now ──
-        self._verify_btn.configure(state="disabled", text="Creating account...")
-        self._status_label.configure(text="✅  Code verified! Creating your account...",
-                                      text_color=C_SUCCESS)
-
-        result = register_user(
-            self._pending["username"],
-            self._pending["email"],
-            self._pending["password"]
-        )
-
-        if result.startswith("ERROR:"):
-            self._verify_btn.configure(state="normal", text="✓  Verify & Create Account")
-            messagebox.showerror("Registration Failed", result.replace("ERROR: ", ""))
-        else:
-            messagebox.showinfo("Account Created", result)
+    def _on_verify_result(self, success: bool, msg: str):
+        if success:
+            self._status_label.configure(text="  Code verified! Account created successfully.", text_color=C_SUCCESS)
+            messagebox.showinfo("Success", "Account verified successfully! You can now log in.")
             self._app.show_login()
+        else:
+            self._verify_btn.configure(state="normal", text="✓  Verify & Create Account")
+            self._attempt_tracker.record_attempt()
+            remaining = self._attempt_tracker.attempts_remaining
+            self._status_label.configure(text=f"  {msg} ({remaining} attempts left)", text_color=C_ERROR_RED)
+            self._otp_entry.delete(0, "end")
 
     # ── RESEND ───────────────────────────────────────────────
 
@@ -442,22 +438,21 @@ class VerificationPage(ctk.CTkFrame):
         """Resends the verification code to the same email."""
         can_resend, reason = self._resend_tracker.can_resend()
         if not can_resend:
-            self._status_label.configure(text=f"⚠  {reason}", text_color=C_WARN)
+            self._status_label.configure(text=f"{reason}", text_color=C_WARN)
             return
 
-        # Generate new OTP
-        new_otp = generate_otp()
-        new_expiry = get_otp_expiry()
-        self._pending["otp_code"] = new_otp
-        self._pending["otp_expiry"] = new_expiry
-
         self._resend_btn.configure(state="disabled")
-        self._status_label.configure(text="📧  Sending new code...", text_color=C_ACCENT)
+        self._status_label.configure(text="Sending new code...", text_color=C_ACCENT)
 
         # Send in background thread
         def resend_task():
-            success, msg = send_verification_email(self._pending["email"], new_otp)
-            self.after(0, lambda: self._on_resend_complete(success, msg))
+            success, msg, new_code = resend_verification_code(self._pending["email"])
+            if not success:
+                self.after(0, lambda: self._on_resend_complete(False, msg))
+                return
+                
+            email_ok, email_msg = send_verification_email(self._pending["email"], new_code)
+            self.after(0, lambda: self._on_resend_complete(email_ok, email_msg))
 
         thread = threading.Thread(target=resend_task, daemon=True)
         thread.start()
@@ -469,13 +464,13 @@ class VerificationPage(ctk.CTkFrame):
             count = self._resend_tracker.resend_count
             from core.email_config import OTP_MAX_RESENDS
             self._status_label.configure(
-                text=f"✅  New code sent! ({count}/{OTP_MAX_RESENDS} resends used)",
+                text=f"New code sent! ({count}/{OTP_MAX_RESENDS} resends used)",
                 text_color=C_SUCCESS
             )
             self._otp_entry.delete(0, "end")
             self._start_cooldown_timer()
         else:
-            self._status_label.configure(text=f"❌  {message}", text_color=C_ERROR_RED)
+            self._status_label.configure(text=f"{message}", text_color=C_ERROR_RED)
             self._resend_btn.configure(state="normal")
 
     # ── COOLDOWN TIMER ───────────────────────────────────────

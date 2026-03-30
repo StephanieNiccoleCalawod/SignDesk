@@ -19,8 +19,8 @@ email_config.py - Email Sending Configuration
 # GMAIL SMTP CREDENTIALS — Fill in your details below
 # ──────────────────────────────────────────────────────────────
 
-SMTP_EMAIL        = "your-email@gmail.com"         # Your Gmail address
-SMTP_APP_PASSWORD = "xxxx xxxx xxxx xxxx"           # 16-char App Password from Google
+SMTP_EMAIL        = "stephanieniccolecalawod@gmail.com"
+SMTP_APP_PASSWORD = "ezue gnld vsrb kgyz"
 
 # ──────────────────────────────────────────────────────────────
 # SMTP SERVER SETTINGS (Gmail defaults — no need to change)
@@ -37,3 +37,4 @@ OTP_LENGTH          = 6         # Number of digits in the verification code
 OTP_EXPIRY_MINUTES  = 5         # How long the code is valid (minutes)
 OTP_RESEND_COOLDOWN = 60        # Seconds between resend attempts
 OTP_MAX_RESENDS     = 5         # Maximum number of resend attempts
+OTP_MAX_VERIFY_ATTEMPTS = 5     # Max wrong OTP entries before lockout

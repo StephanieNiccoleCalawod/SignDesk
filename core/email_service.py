@@ -1,12 +1,12 @@
 """
 email_service.py - Email Sending Utility
 Sends verification emails via Gmail SMTP using Python's built-in smtplib.
-If email is not configured, falls back to showing the code on screen.
+Email MUST be properly configured — no fallback to on-screen display.
 No extra dependencies required.
 """
 
 import smtplib
-import random
+import secrets
 import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -14,7 +14,8 @@ from datetime import datetime, timedelta
 
 from core.email_config import (
     SMTP_EMAIL, SMTP_APP_PASSWORD, SMTP_HOST, SMTP_PORT,
-    OTP_LENGTH, OTP_EXPIRY_MINUTES, OTP_RESEND_COOLDOWN, OTP_MAX_RESENDS
+    OTP_LENGTH, OTP_EXPIRY_MINUTES, OTP_RESEND_COOLDOWN, OTP_MAX_RESENDS,
+    OTP_MAX_VERIFY_ATTEMPTS
 )
 
 
@@ -23,10 +24,10 @@ from core.email_config import (
 # ──────────────────────────────────────────────────────────────
 
 def generate_otp() -> str:
-    """Generates a random 6-digit verification code."""
+    """Generates a cryptographically secure random 6-digit verification code."""
     lower = 10 ** (OTP_LENGTH - 1)
     upper = 10 ** OTP_LENGTH - 1
-    return str(random.randint(lower, upper))
+    return str(secrets.randbelow(upper - lower + 1) + lower)
 
 
 def get_otp_expiry() -> datetime:
@@ -40,38 +41,21 @@ def is_otp_expired(expiry_time: datetime) -> bool:
 
 
 # ──────────────────────────────────────────────────────────────
-# EMAIL CONFIGURATION CHECK
-# ──────────────────────────────────────────────────────────────
-
-def is_email_configured() -> bool:
-    """Returns True if real SMTP credentials have been set up."""
-    return (
-        SMTP_EMAIL != "your-email@gmail.com"
-        and SMTP_APP_PASSWORD != "xxxx xxxx xxxx xxxx"
-        and "@" in SMTP_EMAIL
-    )
-
-
-# ──────────────────────────────────────────────────────────────
 # EMAIL SENDING
 # ──────────────────────────────────────────────────────────────
 
 def send_verification_email(to_email: str, otp_code: str) -> tuple[bool, str]:
     """
-    Sends a verification email with the OTP code.
+    Sends a verification email with the OTP code via SMTP.
 
-    If email is not configured, returns (True, "FALLBACK") so the
-    UI can display the code directly on screen instead.
+    SMTP credentials MUST be configured in email_config.py.
+    If sending fails for any reason, returns (False, "error message").
+    The OTP is NEVER displayed on screen — it is only delivered via email.
 
     Returns:
         (True, "Email sent successfully") — email was sent.
-        (True, "FALLBACK") — email not configured, show code on screen.
         (False, "error message") — sending failed.
     """
-
-    # ── FALLBACK MODE: No email configured → UI will show code ──
-    if not is_email_configured():
-        return True, "FALLBACK"
 
     try:
         msg = MIMEMultipart("alternative")
@@ -144,7 +128,10 @@ def send_verification_email(to_email: str, otp_code: str) -> tuple[bool, str]:
         return True, "Verification email sent successfully."
 
     except smtplib.SMTPAuthenticationError:
-        return False, "Email authentication failed. Please check your email credentials and try again."
+        return False, (
+            "Email authentication failed. Please check SMTP credentials in email_config.py.\n"
+            "Make sure you are using a Gmail App Password (not your regular password)."
+        )
     except smtplib.SMTPRecipientsRefused:
         return False, "The email address was rejected. Please enter a valid email."
     except smtplib.SMTPException as e:
@@ -195,3 +182,42 @@ class ResendTracker:
     def reset(self):
         self._resend_count = 0
         self._last_resend_time = 0.0
+
+
+# ──────────────────────────────────────────────────────────────
+# VERIFICATION ATTEMPT TRACKING (brute-force protection)
+# ──────────────────────────────────────────────────────────────
+
+class VerificationAttemptTracker:
+    """
+    Tracks failed OTP entry attempts to prevent brute-force attacks.
+    After OTP_MAX_VERIFY_ATTEMPTS wrong entries, the user is locked out
+    and must restart the registration process.
+    """
+
+    def __init__(self):
+        self._attempts = 0
+
+    def record_attempt(self):
+        """Records a failed verification attempt."""
+        self._attempts += 1
+
+    def can_attempt(self) -> tuple[bool, str]:
+        """Returns (True, '') if attempts remain, (False, reason) if locked out."""
+        if self._attempts >= OTP_MAX_VERIFY_ATTEMPTS:
+            return False, (
+                f"Too many failed attempts ({OTP_MAX_VERIFY_ATTEMPTS}/{OTP_MAX_VERIFY_ATTEMPTS}). "
+                f"Please restart the registration process."
+            )
+        return True, ""
+
+    @property
+    def attempts_used(self) -> int:
+        return self._attempts
+
+    @property
+    def attempts_remaining(self) -> int:
+        return max(0, OTP_MAX_VERIFY_ATTEMPTS - self._attempts)
+
+    def reset(self):
+        self._attempts = 0

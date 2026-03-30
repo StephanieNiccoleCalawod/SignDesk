@@ -145,7 +145,7 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
 
         cursor.execute(
             """
-            SELECT password_hash
+            SELECT password_hash, email_verified
             FROM   dbo.users
             WHERE  username = ?
             """,
@@ -159,28 +159,30 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
             return False, "Incorrect username or password. Please try again."
 
         stored_hash = row[0].encode("utf-8")
-        if bcrypt.checkpw(password.encode("utf-8"), stored_hash):
-            return True, "Login successful."
-        else:
+        email_verified = row[1]
+        
+        if not bcrypt.checkpw(password.encode("utf-8"), stored_hash):
             return False, "Incorrect username or password. Please try again."
+            
+        if email_verified == False:
+            return False, "Please verify your email address to log in."
+            
+        return True, "Login successful."
 
     except Exception as e:
         return False, f"Database error: {str(e)}"
 
 
-def register_user(username: str, email: str, password: str) -> str:
+def register_user(username: str, email: str, password: str) -> tuple[bool, str, str]:
     """
-    Creates a new user account in the database AFTER email verification.
-    This function should only be called after OTP is verified.
-
-    The account is stored with:
-    - username
-    - email
-    - password_hash (bcrypt)
-    - email_verified = 1
-
-    Returns a result message string (prefixed with ERROR: on failure).
+    Creates a new user account as unverified. 
+    Generates a verification code and saves it to the database with an expiry.
+    Returns: (Success, Message, OTP_Code)
     """
+    import random
+    import string
+    from datetime import datetime
+    from core.email_service import get_otp_expiry
     try:
         conn   = get_connection()
         cursor = conn.cursor()
@@ -189,12 +191,12 @@ def register_user(username: str, email: str, password: str) -> str:
         cursor.execute("SELECT 1 FROM dbo.users WHERE username = ?", (username,))
         if cursor.fetchone():
             conn.close()
-            return "ERROR: This username already exists. Please choose another username."
+            return False, "This username already exists.", ""
 
         cursor.execute("SELECT 1 FROM dbo.users WHERE email = ?", (email,))
         if cursor.fetchone():
             conn.close()
-            return "ERROR: An account with this email already exists."
+            return False, "An account with this email already exists.", ""
 
         # Hash the password securely with bcrypt
         password_hash = bcrypt.hashpw(
@@ -202,19 +204,95 @@ def register_user(username: str, email: str, password: str) -> str:
             bcrypt.gensalt()
         ).decode("utf-8")
 
-        # Insert new user with email_verified = 1 (verified via OTP)
+        # Generate OTP
+        verification_code = ''.join(random.choices(string.digits, k=6))
+        expiry_time = get_otp_expiry()
+
+        # Insert new user with email_verified = 0
         cursor.execute(
             """
-            INSERT INTO dbo.users (username, email, password_hash, email_verified)
-            VALUES (?, ?, ?, 1)
+            INSERT INTO dbo.users (username, email, password_hash, email_verified, verification_code, verification_expiry)
+            VALUES (?, ?, ?, 0, ?, ?)
             """,
-            (username, email, password_hash)
+            (username, email, password_hash, verification_code, expiry_time)
         )
 
         conn.commit()
         conn.close()
 
-        return "Account created successfully! Your email has been verified. You can now log in."
+        return True, "Account created tentatively.", verification_code
 
     except Exception as e:
-        return f"ERROR: {str(e)}"
+        return False, f"Database error: {str(e)}", ""
+
+def verify_user(email: str, entered_code: str) -> tuple[bool, str]:
+    """
+    Verifies the user's email against the database OTP.
+    """
+    from datetime import datetime
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT verification_code, verification_expiry, email_verified FROM dbo.users WHERE email = ?", (email,))
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return False, "Account error: User not found."
+            
+        stored_code, expiry, verified = row
+        
+        if verified == True:
+            conn.close()
+            return False, "Account is already verified."
+            
+        if stored_code != entered_code:
+            conn.close()
+            return False, "Incorrect verification code."
+            
+        if expiry and datetime.now() > expiry:
+            conn.close()
+            return False, "Verification code has expired."
+            
+        # Update as verified
+        cursor.execute("UPDATE dbo.users SET email_verified = 1, verification_code = NULL, verification_expiry = NULL WHERE email = ?", (email,))
+        conn.commit()
+        conn.close()
+        
+        return True, "Email verified successfully."
+    except Exception as e:
+        return False, f"Database error: {str(e)}"
+
+def resend_verification_code(email: str) -> tuple[bool, str, str]:
+    """
+    Generates a new code, updates DB, and returns it.
+    Returns: (Success, Message, NewCode)
+    """
+    import random
+    import string
+    from core.email_service import get_otp_expiry
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT email_verified FROM dbo.users WHERE email = ?", (email,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False, "Account error: User not found.", ""
+            
+        if row[0] == True:
+            conn.close()
+            return False, "Email is already verified.", ""
+            
+        new_code = ''.join(random.choices(string.digits, k=6))
+        expiry = get_otp_expiry()
+        
+        cursor.execute("UPDATE dbo.users SET verification_code = ?, verification_expiry = ? WHERE email = ?", (new_code, expiry, email))
+        conn.commit()
+        conn.close()
+        
+        return True, "New code generated.", new_code
+    except Exception as e:
+        return False, f"Database error: {str(e)}", ""
