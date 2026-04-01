@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "C:\Users\Ideapad\OneDrive\Desktop\SignDesk\test_ui2.py", line 7, in <module>
+    GestureDetectionPage(app, app, "test")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Ideapad\OneDrive\Desktop\SignDesk\modules\vision\ui.py", line 57, in __init__
+    self._build()
+    ~~~~~~~~~~~^^
+  File "C:\Users\Ideapad\OneDrive\Desktop\SignDesk\modules\vision\ui.py", line 110, in _build
+    ctk.CTkLabel(right_panel, text="Recognized Gesture", font=ctk.CTkFont(family=FONT_PRIMARY, size=18, weight="bold"), text_color=C_TEXT_DARK).pack(pady=(20, 10), padx=20, anchor="w", fill="x")
+                                                                                 ^^^^^^^^^^^^
+NameError: name 'FONT_PRIMARY' is not defined

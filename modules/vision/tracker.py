@@ -1,16 +1,33 @@
 """
 tracker.py - Hand Landmark Tracker
-Detects and tracks hand landmarks using MediaPipe Hands.
+Detects and tracks hand landmarks using Modern MediaPipe Tasks API.
 Maps to: SD002 (Hand detection system)
 """
 
 import mediapipe as mp
 import cv2
+import os
+import urllib.request
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+
+# Download URL for the task model
+MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "hand_landmarker.task")
+
+# Standard MediaPipe Hand Connections for custom drawing
+HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    (0, 5), (5, 6), (6, 7), (7, 8),
+    (5, 9), (9, 10), (10, 11), (11, 12),
+    (9, 13), (13, 14), (14, 15), (15, 16),
+    (13, 17), (0, 17), (17, 18), (18, 19), (19, 20)
+]
 
 
 class HandTracker:
     """
-    Detects 21 hand landmarks per frame using MediaPipe Hands.
+    Detects 21 hand landmarks per frame using Modern MediaPipe Tasks API.
 
     Acceptance Criteria:
     - SD002-AC1: MediaPipe Hands detects 21 hand landmarks per frame
@@ -22,19 +39,28 @@ class HandTracker:
 
     def __init__(self, max_num_hands: int = 1, min_detection_confidence: float = 0.7,
                  min_tracking_confidence: float = 0.5):
-        self._mp_hands = mp.solutions.hands
-        self._mp_drawing = mp.solutions.drawing_utils
-        self._mp_drawing_styles = mp.solutions.drawing_styles
-
-        self._hands = self._mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=max_num_hands,
-            min_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=min_tracking_confidence,
+        
+        self._ensure_model_exists()
+        
+        base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+        options = vision.HandLandmarkerOptions(
+            base_options=base_options,
+            num_hands=max_num_hands,
+            min_hand_detection_confidence=min_detection_confidence,
+            min_hand_presence_confidence=min_tracking_confidence,
+            min_tracking_confidence=min_tracking_confidence
         )
+        self._detector = vision.HandLandmarker.create_from_options(options)
 
         self._last_landmarks = None
         self._hand_detected = False
+
+    def _ensure_model_exists(self):
+        """Downloads the MediaPipe task file if not present."""
+        if not os.path.exists(MODEL_PATH):
+            print(f"Downloading MediaPipe model to {MODEL_PATH}...")
+            urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+            print("Download complete.")
 
     def process_frame(self, frame):
         """
@@ -48,39 +74,59 @@ class HandTracker:
         """
         # MediaPipe requires RGB input
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        rgb_frame.flags.writeable = False
+        
+        # Modern Tasks Image wrapper
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        
+        # Detect hands (synchronous call for single frame)
+        results = self._detector.detect(mp_image)
 
-        results = self._hands.process(rgb_frame)
-
-        rgb_frame.flags.writeable = True
         annotated_frame = frame.copy()
 
-        if results.multi_hand_landmarks:
+        if results.hand_landmarks:
             self._hand_detected = True
 
             # Take the first detected hand
-            hand_landmarks = results.multi_hand_landmarks[0]
-
-            # Draw landmarks on the frame (SD002-AC2)
-            self._mp_drawing.draw_landmarks(
-                annotated_frame,
-                hand_landmarks,
-                self._mp_hands.HAND_CONNECTIONS,
-                self._mp_drawing_styles.get_default_hand_landmarks_style(),
-                self._mp_drawing_styles.get_default_hand_connections_style(),
-            )
+            hand_landmarks = results.hand_landmarks[0]
 
             # Extract 21 landmark coordinates
             landmarks = []
-            for lm in hand_landmarks.landmark:
+            for lm in hand_landmarks:
                 landmarks.append((lm.x, lm.y, lm.z))
 
             self._last_landmarks = landmarks
+            
+            # Custom Landmark Overlay (SD002-AC2) to avoid crashed solutions library
+            self._draw_custom_landmarks(annotated_frame, landmarks)
+            
             return True, landmarks, annotated_frame
         else:
             self._hand_detected = False
             self._last_landmarks = None
             return False, None, annotated_frame
+
+    def _draw_custom_landmarks(self, frame, landmarks):
+        """Manually draws 21 landmarks and connections using OpenCV."""
+        h, w, _ = frame.shape
+        
+        # Convert normalized (x,y) to pixel coordinates
+        pixels = []
+        for x, y, _ in landmarks:
+            cx, cy = int(x * w), int(y * h)
+            pixels.append((cx, cy))
+            
+        # Draw skeleton connections
+        for start_idx, end_idx in HAND_CONNECTIONS:
+            if start_idx < len(pixels) and end_idx < len(pixels):
+                pt1 = pixels[start_idx]
+                pt2 = pixels[end_idx]
+                cv2.line(frame, pt1, pt2, (0, 0, 0), 2)       # Shadow outline
+                cv2.line(frame, pt1, pt2, (255, 255, 255), 1) # White inner line
+                
+        # Draw joints
+        for cx, cy in pixels:
+            cv2.circle(frame, (cx, cy), 5, (0, 0, 0), -1)   # Shadow outline
+            cv2.circle(frame, (cx, cy), 3, (0, 255, 0), -1) # Green center
 
     @property
     def is_hand_detected(self) -> bool:
@@ -92,7 +138,10 @@ class HandTracker:
 
     def release(self):
         """Releases MediaPipe resources."""
-        self._hands.close()
+        self._detector.close()
 
     def __del__(self):
-        self.release()
+        try:
+            self.release()
+        except:
+            pass

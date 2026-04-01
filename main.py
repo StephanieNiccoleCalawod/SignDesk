@@ -13,7 +13,7 @@ class SignDeskApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("SignDesk")
-        self.geometry("960x620")
+        self.geometry("900x650")
         self.resizable(False, False)
         
         # Apply theme globally
@@ -21,9 +21,9 @@ class SignDeskApp(ctk.CTk):
         self.configure(fg_color=C_BG)
 
         self.update_idletasks()
-        x = (self.winfo_screenwidth()  - 960) // 2
-        y = (self.winfo_screenheight() - 620) // 2
-        self.geometry(f"960x620+{x}+{y}")
+        x = (self.winfo_screenwidth()  - 900) // 2
+        y = (self.winfo_screenheight() - 650) // 2
+        self.geometry(f"900x650+{x}+{y}")
 
         self._current_page = None
         self._current_user = None
@@ -36,27 +36,27 @@ class SignDeskApp(ctk.CTk):
 
     def show_login(self):
         self._clear()
-        self._set_size(960, 620)
+        self._set_size(900, 650)
         self._current_page = LoginPage(self, self)
         self._current_page.pack(fill="both", expand=True)
 
     def show_register(self):
         self._clear()
-        self._set_size(960, 620)
+        self._set_size(900, 650)
         self._current_page = RegisterPage(self, self)
         self._current_page.pack(fill="both", expand=True)
 
     def show_verification(self, pending_data: dict):
         """Navigate to the email verification page."""
         self._clear()
-        self._set_size(960, 620)
+        self._set_size(900, 650)
         self._current_page = VerificationPage(self, self, pending_data)
         self._current_page.pack(fill="both", expand=True)
 
     def show_dashboard(self, username: str):
         self._current_user = username
         self._clear()
-        self._set_size(960, 620)
+        self._set_size(900, 650)
         self._current_page = DashboardPage(self, self, username)
         self._current_page.pack(fill="both", expand=True)
 
@@ -64,7 +64,7 @@ class SignDeskApp(ctk.CTk):
         """Navigate to the Gesture Detection page (Module 2)."""
         self._current_user = username
         self._clear()
-        self._set_size(1200, 720)
+        self._set_size(900, 650)
         self._current_page = GestureDetectionPage(self, self, username)
         self._current_page.pack(fill="both", expand=True)
 

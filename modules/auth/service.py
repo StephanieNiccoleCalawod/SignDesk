@@ -98,7 +98,7 @@ def check_duplicate_username(username: str) -> tuple[bool, str]:
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM dbo.users WHERE username = ?", (username,))
+        cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
         exists = cursor.fetchone() is not None
         conn.close()
 
@@ -118,7 +118,7 @@ def check_duplicate_email(email: str) -> tuple[bool, str]:
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM dbo.users WHERE email = ?", (email,))
+        cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
         exists = cursor.fetchone() is not None
         conn.close()
 
@@ -146,7 +146,7 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
         cursor.execute(
             """
             SELECT password_hash, email_verified
-            FROM   dbo.users
+            FROM   users
             WHERE  username = ?
             """,
             (username,)
@@ -188,12 +188,12 @@ def register_user(username: str, email: str, password: str) -> tuple[bool, str, 
         cursor = conn.cursor()
 
         # Final duplicate checks (safety — may have changed since form submission)
-        cursor.execute("SELECT 1 FROM dbo.users WHERE username = ?", (username,))
+        cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
         if cursor.fetchone():
             conn.close()
             return False, "This username already exists.", ""
 
-        cursor.execute("SELECT 1 FROM dbo.users WHERE email = ?", (email,))
+        cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
         if cursor.fetchone():
             conn.close()
             return False, "An account with this email already exists.", ""
@@ -211,7 +211,7 @@ def register_user(username: str, email: str, password: str) -> tuple[bool, str, 
         # Insert new user with email_verified = 0
         cursor.execute(
             """
-            INSERT INTO dbo.users (username, email, password_hash, email_verified, verification_code, verification_expiry)
+            INSERT INTO users (username, email, password_hash, email_verified, verification_code, verification_expiry)
             VALUES (?, ?, ?, 0, ?, ?)
             """,
             (username, email, password_hash, verification_code, expiry_time)
@@ -234,7 +234,7 @@ def verify_user(email: str, entered_code: str) -> tuple[bool, str]:
         conn = get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("SELECT verification_code, verification_expiry, email_verified FROM dbo.users WHERE email = ?", (email,))
+        cursor.execute("SELECT verification_code, verification_expiry, email_verified FROM users WHERE email = ?", (email,))
         row = cursor.fetchone()
         
         if not row:
@@ -256,7 +256,7 @@ def verify_user(email: str, entered_code: str) -> tuple[bool, str]:
             return False, "Verification code has expired."
             
         # Update as verified
-        cursor.execute("UPDATE dbo.users SET email_verified = 1, verification_code = NULL, verification_expiry = NULL WHERE email = ?", (email,))
+        cursor.execute("UPDATE users SET email_verified = 1, verification_code = NULL, verification_expiry = NULL WHERE email = ?", (email,))
         conn.commit()
         conn.close()
         
@@ -276,7 +276,7 @@ def resend_verification_code(email: str) -> tuple[bool, str, str]:
         conn = get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("SELECT email_verified FROM dbo.users WHERE email = ?", (email,))
+        cursor.execute("SELECT email_verified FROM users WHERE email = ?", (email,))
         row = cursor.fetchone()
         if not row:
             conn.close()
@@ -289,7 +289,7 @@ def resend_verification_code(email: str) -> tuple[bool, str, str]:
         new_code = ''.join(random.choices(string.digits, k=6))
         expiry = get_otp_expiry()
         
-        cursor.execute("UPDATE dbo.users SET verification_code = ?, verification_expiry = ? WHERE email = ?", (new_code, expiry, email))
+        cursor.execute("UPDATE users SET verification_code = ?, verification_expiry = ? WHERE email = ?", (new_code, expiry, email))
         conn.commit()
         conn.close()
         

@@ -1,102 +1,70 @@
 """
 database.py - SignDesk Database Connection (Core)
-Connects to Microsoft SQL Server (MSSQL) via pyodbc.
+Connects to a local SQLite database file perfectly aligned with offline requirements.
 """
 
-import pyodbc
+import sqlite3
+import os
 
 # ──────────────────────────────────────────────────────────────
-# CONNECTION SETTINGS — Edit these to match your setup
+# CONNECTION SETTINGS
 # ──────────────────────────────────────────────────────────────
 
-SERVER   = r"ZEPHHH\SQLEXPRESS"          # or your SQL Server IP / hostname
-DATABASE = "SignDeskDB"
-
-
-# ──────────────────────────────────────────────────────────────
-# CHOOSE ONE: Windows Auth OR SQL Server Auth
-# ──────────────────────────────────────────────────────────────
+# Create the database in the root of the project
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "signdesk.db")
 
 def get_connection():
     """
-    Returns a live pyodbc connection to SignDeskDB.
-    
-    Use Option A if you're on Windows and logged into the same machine.
-    Use Option B if you have a SQL Server username and password.
+    Returns a live connection to the local SQLite database.
+    Creates the file automatically if it doesn't exist.
     """
-
-    # ── Option A: Windows Authentication (recommended for local dev) ──
-    conn_str = (
-        "DRIVER={ODBC Driver 17 for SQL Server};"
-        f"SERVER={SERVER};"
-        f"DATABASE={DATABASE};"
-        "Trusted_Connection=yes;"
-    )
-
-    # ── Option B: SQL Server Authentication ──
-    # Uncomment below and comment out Option A if using SQL login:
-    #
-    # conn_str = (
-    #     "DRIVER={ODBC Driver 17 for SQL Server};"
-    #     f"SERVER={SERVER};"
-    #     f"DATABASE={DATABASE};"
-    #     f"UID={USERNAME};"
-    #     f"PWD={PASSWORD};"
-    # )
-
-    return pyodbc.connect(conn_str)
-
+    # PARSE_DECLTYPES ensures DATETIME columns map correctly to Python datetime objects
+    conn = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
+    # Enable name-based access to columns (similar to pyodbc rows)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 # ──────────────────────────────────────────────────────────────
-# SCHEMA MIGRATION
+# SCHEMA MIGRATION / INITIALIZATION
 # ──────────────────────────────────────────────────────────────
 
 def update_database_schema():
-    """Safely adds missing verification columns to the users table."""
+    """
+    Ensures the SQLite database has all required tables and columns.
+    Safe to run on every startup.
+    """
     try:
         conn = get_connection()
         cursor = conn.cursor()
 
-        # Safely add email_verified (BIT) - note we do not set DEFAULT 0 WITH VALUES 
-        # so old legacy accounts stay NULL, but we will deal with that in login.
+        # Create the users table
         cursor.execute("""
-            IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'email_verified')
-            BEGIN
-                ALTER TABLE dbo.users ADD email_verified BIT DEFAULT 0;
-            END
-        """)
-
-        # Safely add verification_code (NVARCHAR)
-        cursor.execute("""
-            IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'verification_code')
-            BEGIN
-                ALTER TABLE dbo.users ADD verification_code NVARCHAR(10) NULL;
-            END
-        """)
-
-        # Safely add verification_expiry (DATETIME)
-        cursor.execute("""
-            IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'verification_expiry')
-            BEGIN
-                ALTER TABLE dbo.users ADD verification_expiry DATETIME NULL;
-            END
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                email_verified INTEGER DEFAULT 0,
+                verification_code TEXT NULL,
+                verification_expiry TIMESTAMP NULL
+            )
         """)
 
         conn.commit()
         conn.close()
-        print("Database schema verified/updated successfully.")
     except Exception as e:
-        print(f"Error updating schema: {e}")
-
+        print(f"Schema Error: {e}")
 
 # ──────────────────────────────────────────────────────────────
-# TEST — Run this file directly to check your connection
+# TEST
 # ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     try:
         conn = get_connection()
-        print("✅ Connected to SignDeskDB successfully!")
+        print(f"Connected to SQLite Database successfully at: {DB_PATH}")
         conn.close()
+        update_database_schema()
     except Exception as e:
-        print(f"❌ Connection failed: {e}")
+        print(f"Connection failed: {e}")
