@@ -13,7 +13,8 @@ class SignDeskApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("SignDesk")
-        self.geometry("900x650")
+        self.geometry("950x680")
+        self.minsize(950, 680)
         self.resizable(False, False)
         
         # Apply theme globally
@@ -36,12 +37,14 @@ class SignDeskApp(ctk.CTk):
 
     def show_login(self):
         self._clear()
+        self.resizable(False, False)
         self._set_size(900, 650)
         self._current_page = LoginPage(self, self)
         self._current_page.pack(fill="both", expand=True)
 
     def show_register(self):
         self._clear()
+        self.resizable(False, False)
         self._set_size(900, 650)
         self._current_page = RegisterPage(self, self)
         self._current_page.pack(fill="both", expand=True)
@@ -49,6 +52,7 @@ class SignDeskApp(ctk.CTk):
     def show_verification(self, pending_data: dict):
         """Navigate to the email verification page."""
         self._clear()
+        self.resizable(False, False)
         self._set_size(900, 650)
         self._current_page = VerificationPage(self, self, pending_data)
         self._current_page.pack(fill="both", expand=True)
@@ -56,7 +60,8 @@ class SignDeskApp(ctk.CTk):
     def show_dashboard(self, username: str):
         self._current_user = username
         self._clear()
-        self._set_size(900, 650)
+        self.resizable(True, True)
+        self._set_size(950, 680)
         self._current_page = DashboardPage(self, self, username)
         self._current_page.pack(fill="both", expand=True)
 
@@ -64,7 +69,8 @@ class SignDeskApp(ctk.CTk):
         """Navigate to the Gesture Detection page (Module 2)."""
         self._current_user = username
         self._clear()
-        self._set_size(900, 650)
+        self.resizable(True, True)
+        self._set_size(950, 680)
         self._current_page = GestureDetectionPage(self, self, username)
         self._current_page.pack(fill="both", expand=True)
 

@@ -114,8 +114,11 @@ def check_A(landmarks):
     # All four fingers curled
     if not states["index"] and not states["middle"] and not states["ring"] and not states["pinky"]:
         score += 0.5
-    # Thumb should be extended or beside the fist (not tucked)
-    if states["thumb"] or lm[THUMB_TIP][1] < lm[INDEX_MCP][1]:
+    # Thumb outside / alongside the fist
+    thumb_x, index_x, middle_x = lm[THUMB_TIP][0], lm[INDEX_MCP][0], lm[MIDDLE_MCP][0]
+    is_outside = abs(thumb_x - middle_x) > abs(index_x - middle_x) and abs(thumb_x - index_x) < abs(thumb_x - middle_x)
+    
+    if is_outside and lm[THUMB_TIP][1] < lm[INDEX_MCP][1]:
         score += 0.3
     # Fingers tightly curled
     if curl["index"] > 0.4 and curl["middle"] > 0.4:
@@ -151,8 +154,8 @@ def check_C(landmarks):
     curl = get_finger_curl(lm)
 
     score = 0.0
-    # Fingers partially curled (not fully extended, not fully curled)
-    mid_curl = all(0.15 < curl[f] < 0.7 for f in ["index", "middle", "ring", "pinky"])
+    # All fingers partially curled (excludes tightly curled fists > 0.70)
+    mid_curl = all(0.10 < curl[f] < 0.70 for f in ["index", "middle", "ring", "pinky"])
     if mid_curl:
         score += 0.5
     # Thumb extended outward
@@ -483,8 +486,11 @@ def check_S(landmarks):
     # All fingers curled
     if not states["index"] and not states["middle"] and not states["ring"] and not states["pinky"]:
         score += 0.4
-    # Thumb over fingers (not alongside like A)
-    if not states["thumb"]:
+    # Thumb wrapped across the front/middle of curled fingers
+    thumb_x, index_x, middle_x = lm[THUMB_TIP][0], lm[INDEX_MCP][0], lm[MIDDLE_MCP][0]
+    is_crossed_over = abs(thumb_x - index_x) > abs(middle_x - index_x) and abs(thumb_x - middle_x) < abs(thumb_x - index_x)
+    
+    if is_crossed_over:
         score += 0.2
     # Thumb tip in front of curled fingers
     if lm[THUMB_TIP][1] < lm[INDEX_PIP][1]:

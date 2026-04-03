@@ -91,7 +91,7 @@ def _primary_btn(parent, text, command):
         font=FONT_BTN,
         fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
         text_color=C_WHITE,
-        height=42, corner_radius=8
+        height=42, corner_radius=21
     )
 
 
@@ -102,7 +102,7 @@ def _outline_btn(parent, text, command):
         fg_color=C_WHITE, hover_color=C_INPUT_BG,
         text_color=C_TEXT_DARK,
         border_width=1, border_color=C_CARD_BORDER,
-        height=42, corner_radius=8
+        height=42, corner_radius=21
     )
 
 
@@ -117,27 +117,51 @@ class LoginPage(ctk.CTkFrame):
         self._build()
 
     def _build(self):
-        # Left brand panel (unchanged — uses existing make_left_panel)
+        # ── Left brand panel ───────────────────────────────
         make_left_panel(self).pack(side="left", fill="y")
 
+        # ── Right content area ─────────────────────────────
         right = ctk.CTkFrame(self, fg_color=C_WHITE, corner_radius=0)
         right.pack(side="left", fill="both", expand=True)
 
-        form_wrap = ctk.CTkFrame(right, fg_color="transparent")
-        form_wrap.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.72)
+        # Center the form both horizontally and vertically
+        # using a fixed-width container placed at center
+        form_wrap = ctk.CTkFrame(right, fg_color="transparent", width=380)
+        form_wrap.place(relx=0.5, rely=0.5, anchor="center")
 
-        _section_label(form_wrap, "Welcome back", "Sign in to continue to SignDesk")
+        # ── Heading ────────────────────────────────────────
+        ctk.CTkLabel(
+            form_wrap, text="Welcome back",
+            font=(FONT_PRIMARY, 24, "bold"),
+            text_color=C_TEXT_DARK, fg_color="transparent", anchor="w"
+        ).pack(fill="x")
+        ctk.CTkLabel(
+            form_wrap, text="Sign in to continue to SignDesk",
+            font=(FONT_PRIMARY, 12),
+            text_color=C_TEXT_MID, fg_color="transparent", anchor="w"
+        ).pack(fill="x", pady=(4, 28))
 
-        _field_label(form_wrap, "USERNAME")
+        # ── Username field ─────────────────────────────────
+        ctk.CTkLabel(
+            form_wrap, text="USERNAME",
+            font=(FONT_PRIMARY, 10, "bold"),
+            text_color=C_TEXT_LIGHT, fg_color="transparent", anchor="w"
+        ).pack(fill="x", pady=(0, 6))
+
         self._user_entry = _make_entry(form_wrap, "Enter your username")
 
-        # Password row with forgot link
-        pw_row = ctk.CTkFrame(form_wrap, fg_color="transparent")
-        pw_row.pack(fill="x", pady=(0, 4))
-        _field_label(pw_row, "PASSWORD")
-        # Forgot password floated right
+        # ── Password label row (label left + forgot right) ─
+        pw_header = ctk.CTkFrame(form_wrap, fg_color="transparent")
+        pw_header.pack(fill="x", pady=(4, 6))
+
+        ctk.CTkLabel(
+            pw_header, text="PASSWORD",
+            font=(FONT_PRIMARY, 10, "bold"),
+            text_color=C_TEXT_LIGHT, fg_color="transparent", anchor="w"
+        ).pack(side="left")
+
         ctk.CTkButton(
-            pw_row, text="Forgot password?",
+            pw_header, text="Forgot password?",
             font=(FONT_PRIMARY, 10), fg_color="transparent",
             hover_color=C_INPUT_BG, text_color=C_ACCENT,
             width=0, height=18, corner_radius=4
@@ -145,27 +169,34 @@ class LoginPage(ctk.CTkFrame):
 
         self._pass_entry = _make_entry(form_wrap, "Enter your password", show="●")
 
-        # Show password checkbox
+        # ── Show password toggle ───────────────────────────
         show_row = ctk.CTkFrame(form_wrap, fg_color="transparent")
-        show_row.pack(fill="x", pady=(0, 20))
+        show_row.pack(fill="x", pady=(0, 24))
         self._show_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
             show_row, text="Show Password",
             variable=self._show_var, command=self._toggle_password,
-            font=FONT_SMALL, text_color=C_TEXT_MID,
+            font=(FONT_PRIMARY, 11), text_color=C_TEXT_MID,
             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-            checkmark_color=C_WHITE, border_color=C_INPUT_BORDER
+            checkmark_color=C_WHITE, border_color=C_INPUT_BORDER,
+            checkbox_width=18, checkbox_height=18, corner_radius=4,
         ).pack(side="left")
 
-        _primary_btn(form_wrap, "Sign In", self._on_login).pack(fill="x", pady=(0, 0))
+        # ── Buttons ────────────────────────────────────────
+        _primary_btn(form_wrap, "Sign In", self._on_login).pack(
+            fill="x", pady=(0, 6))
+
         _divider(form_wrap)
-        _outline_btn(form_wrap, "Create Account", self._app.show_register).pack(fill="x")
+
+        _outline_btn(form_wrap, "Create Account",
+                     self._app.show_register).pack(fill="x")
 
         ctk.CTkLabel(
             form_wrap,
             text="Don't have an account? Click Create Account above.",
-            font=FONT_SMALL, text_color=C_TEXT_LIGHT, fg_color="transparent"
-        ).pack(pady=(14, 0))
+            font=(FONT_PRIMARY, 10), text_color=C_TEXT_LIGHT,
+            fg_color="transparent"
+        ).pack(pady=(16, 0))
 
     def _toggle_password(self):
         self._pass_entry.configure(show="" if self._show_var.get() else "●")

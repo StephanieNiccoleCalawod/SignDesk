@@ -1,0 +1,215 @@
+def check_A(landmarks):
+    """ASL 'A': Fist with thumb alongside (thumb up beside index)."""
+    lm = landmarks
+    states = get_finger_states(lm)
+    curl = get_finger_curl(lm)
+
+    score = 0.0
+    # All four fingers curled
+    if not states["index"] and not states["middle"] and not states["ring"] and not states["pinky"]:
+        score += 0.5
+    # Thumb should be extended or beside the fist (not tucked)
+    if states["thumb"] or lm[THUMB_TIP][1] < lm[INDEX_MCP][1]:
+        score += 0.3
+    # Fingers tightly curled
+    if curl["index"] > 0.4 and curl["middle"] > 0.4:
+        score += 0.2
+
+    return min(score, 1.0)
+
+
+def check_C(landmarks):
+    """ASL 'C': Curved hand forming a C shape."""
+    lm = landmarks
+    states = get_finger_states(lm)
+    curl = get_finger_curl(lm)
+
+    score = 0.0
+    # Fingers partially curled (not fully extended, not fully curled)
+    mid_curl = all(0.15 < curl[f] < 0.7 for f in ["index", "middle", "ring", "pinky"])
+    if mid_curl:
+        score += 0.5
+    # Thumb extended outward
+    if states["thumb"]:
+        score += 0.25
+    # Gap between thumb and index (C shape opening)
+    gap = _distance_2d(lm[THUMB_TIP], lm[INDEX_TIP])
+    if gap > 0.08:
+        score += 0.25
+
+    return min(score, 1.0)
+
+
+def check_E(landmarks):
+    """ASL 'E': All fingers curled, thumb tucked below fingers."""
+    lm = landmarks
+    states = get_finger_states(lm)
+    curl = get_finger_curl(lm)
+
+    score = 0.0
+    # All fingers curled
+    if not states["index"] and not states["middle"] and not states["ring"] and not states["pinky"]:
+        score += 0.4
+    # Thumb tucked (not extended)
+    if not states["thumb"]:
+        score += 0.2
+    # Fingertips close to palm (high curl values)
+    if all(curl[f] > 0.3 for f in ["index", "middle", "ring", "pinky"]):
+        score += 0.2
+    # Thumb tip below index fingertip
+    if lm[THUMB_TIP][1] > lm[INDEX_TIP][1]:
+        score += 0.2
+
+    return min(score, 1.0)
+
+
+def check_O(landmarks):
+    """ASL 'O': All fingertips touching thumb forming O shape."""
+    lm = landmarks
+
+    score = 0.0
+    # All fingertips close to thumb tip
+    for tip in [INDEX_TIP, MIDDLE_TIP, RING_TIP, PINKY_TIP]:
+        dist = _distance_2d(lm[THUMB_TIP], lm[tip])
+        if dist < 0.08:
+            score += 0.2
+
+    # Fingers curved inward (partial curl)
+    curl = get_finger_curl(lm)
+    if all(curl[f] > 0.15 for f in ["index", "middle", "ring", "pinky"]):
+        score += 0.2
+
+    return min(score, 1.0)
+
+
+def check_S(landmarks):
+    """ASL 'S': Fist with thumb over curled fingers."""
+    lm = landmarks
+    states = get_finger_states(lm)
+    curl = get_finger_curl(lm)
+
+    score = 0.0
+    # All fingers curled
+    if not states["index"] and not states["middle"] and not states["ring"] and not states["pinky"]:
+        score += 0.4
+    # Thumb over fingers (not alongside like A)
+    if not states["thumb"]:
+        score += 0.2
+    # Thumb tip in front of curled fingers
+    if lm[THUMB_TIP][1] < lm[INDEX_PIP][1]:
+        score += 0.2
+    # Tight fist
+    if all(curl[f] > 0.4 for f in ["index", "middle", "ring", "pinky"]):
+        score += 0.2
+
+    return min(score, 1.0)
+
+
+def check_P(landmarks):
+    """ASL 'P': Like K but pointing downward."""
+    lm = landmarks
+    states = get_finger_states(lm)
+
+    score = 0.0
+    # Index pointing down
+    if lm[INDEX_TIP][1] > lm[INDEX_MCP][1]:
+        score += 0.3
+    # Middle finger extended downward
+    if lm[MIDDLE_TIP][1] > lm[MIDDLE_MCP][1]:
+        score += 0.2
+    # Ring and pinky curled
+    if not states["ring"] and not states["pinky"]:
+        score += 0.25
+    # Thumb out
+    if states["thumb"]:
+        score += 0.25
+
+    return min(score, 1.0)
+
+
+def check_Q(landmarks):
+    """ASL 'Q': Like G but pointing downward — thumb and index down."""
+    lm = landmarks
+    states = get_finger_states(lm)
+
+    score = 0.0
+    # Index pointing down
+    if lm[INDEX_TIP][1] > lm[INDEX_MCP][1]:
+        score += 0.3
+    # Thumb pointing down
+    if lm[THUMB_TIP][1] > lm[THUMB_MCP][1]:
+        score += 0.3
+    # Middle, ring, pinky curled
+    if not states["middle"] and not states["ring"] and not states["pinky"]:
+        score += 0.4
+
+    return min(score, 1.0)
+
+
+def check_T(landmarks):
+    """ASL 'T': Thumb inserted between index and middle (fist)."""
+    lm = landmarks
+    states = get_finger_states(lm)
+
+    score = 0.0
+    # All fingers curled
+    if not states["index"] and not states["middle"] and not states["ring"] and not states["pinky"]:
+        score += 0.4
+    # Thumb positioned between index and middle
+    thumb_x = lm[THUMB_TIP][0]
+    index_x = lm[INDEX_MCP][0]
+    middle_x = lm[MIDDLE_MCP][0]
+    if min(index_x, middle_x) <= thumb_x <= max(index_x, middle_x):
+        score += 0.3
+    # Thumb tip visible (not hidden behind fist)
+    if lm[THUMB_TIP][1] < lm[INDEX_PIP][1]:
+        score += 0.3
+
+    return min(score, 1.0)
+
+
+def check_U(landmarks):
+    """ASL 'U': Index and middle extended together upward, others curled."""
+    lm = landmarks
+    states = get_finger_states(lm)
+
+    score = 0.0
+    # Index and middle extended upward
+    if states["index"] and states["middle"]:
+        score += 0.4
+    # Ring and pinky curled
+    if not states["ring"] and not states["pinky"]:
+        score += 0.3
+    # Fingers together (close, not spread like V)
+    spread = _distance_2d(lm[INDEX_TIP], lm[MIDDLE_TIP])
+    if spread < 0.05:
+        score += 0.3
+
+    return min(score, 1.0)
+
+
+def check_R(landmarks):
+    """ASL 'R': Index and middle crossed (extended upward)."""
+    lm = landmarks
+    states = get_finger_states(lm)
+
+    score = 0.0
+    # Index and middle extended
+    if states["index"] and states["middle"]:
+        score += 0.4
+    # Ring and pinky curled
+    if not states["ring"] and not states["pinky"]:
+        score += 0.2
+    # Fingers crossed (index tip x crosses over middle tip x)
+    index_x = lm[INDEX_TIP][0]
+    middle_x = lm[MIDDLE_TIP][0]
+    index_mcp_x = lm[INDEX_MCP][0]
+    middle_mcp_x = lm[MIDDLE_MCP][0]
+    # Check if tips are closer or crossed compared to base
+    tips_close = _distance_2d(lm[INDEX_TIP], lm[MIDDLE_TIP]) < 0.04
+    if tips_close:
+        score += 0.4
+
+    return min(score, 1.0)
+
+

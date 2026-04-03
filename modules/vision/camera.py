@@ -55,13 +55,6 @@ class CameraManager:
         except Exception as e:
             return False, f"Webcam device not detected. Please connect a webcam."
 
-    def read_frame():
-        """
-        Reads a single frame from the webcam.
-        Returns (success, frame, fps).
-        """
-        pass  # Placeholder — implemented below
-
     def read_frame(self):
         """
         Reads a single frame from the webcam.

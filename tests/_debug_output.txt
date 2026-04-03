@@ -1,0 +1,7 @@
+﻿A: own=0.80 winner=P(1.00) thumb=True tip4=(0.55, 0.48, 0.0) ip3=(0.68, 0.55, 0.0)
+C: own=0.50 winner=A(1.00) thumb=True tip4=(0.6, 0.48, 0.0) ip3=(0.72, 0.55, 0.0)
+E: own=0.80 winner=Q(1.00) thumb=False tip4=(0.7, 0.72, 0.0) ip3=(0.6, 0.55, 0.0)
+O: own=1.00 winner=N(1.00) thumb=False tip4=(0.54, 0.55, 0.0) ip3=(0.5, 0.53, 0.0)
+S: own=0.80 winner=N(0.80) thumb=False tip4=(0.58, 0.55, 0.0) ip3=(0.55, 0.54, 0.0)
+T: own=1.00 winner=T(1.00) thumb=False tip4=(0.515, 0.55, 0.0) ip3=(0.5, 0.52, 0.0)
+U: own=1.00 winner=U(1.00) thumb=False tip4=(0.75, 0.48, 0.0) ip3=(0.72, 0.55, 0.0)
