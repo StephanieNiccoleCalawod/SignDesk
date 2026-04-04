@@ -12,6 +12,11 @@ from core.theme import *
 from modules.vision.camera import CameraManager
 from modules.vision.tracker import HandTracker
 from modules.gestures.engine import GestureRecognizer
+from modules.text.mapper import map_gesture_to_text
+from modules.text.buffer import TextBuffer
+from modules.sentence.builder import SentenceBuilder
+from modules.speech.tts import tts_engine
+import time
 
 
 class GestureDetectionPage(ctk.CTkFrame):
@@ -24,6 +29,8 @@ class GestureDetectionPage(ctk.CTkFrame):
         self._camera     = CameraManager()
         self._tracker    = HandTracker()
         self._recognizer = GestureRecognizer()
+        self._text_buffer = TextBuffer()
+        self._sentence_builder = SentenceBuilder(timeout=2.0)
         self._is_detecting  = False
         self._update_job    = None
         self._gesture_history = []
@@ -132,11 +139,14 @@ class GestureDetectionPage(ctk.CTkFrame):
         right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         right.pack_propagate(False)
 
+        # ── Communication Output panel (Sprint 5 — SD005) ───
+        self._build_output_panel(right)
+
         ctk.CTkLabel(
             right, text="Recognized Gesture",
             font=(FONT_PRIMARY, 14, "bold"),
             text_color=C_TEXT_DARK, fg_color="transparent"
-        ).pack(pady=(20, 8), padx=20, anchor="w")
+        ).pack(pady=(12, 8), padx=20, anchor="w")
 
         # Gesture result card
         result_card = ctk.CTkFrame(
@@ -311,6 +321,14 @@ class GestureDetectionPage(ctk.CTkFrame):
         self._conf_bar.set(0)
         self._conf_bar.configure(progress_color=C_SUCCESS)
         self._conf_warning.configure(text="")
+        # Sprint 5/6 — reset communication output and sentence
+        self._text_buffer.clear()
+        self._sentence_builder.reset()
+        self._refresh_output()
+        if hasattr(self, "_final_sentence_label"):
+            self._final_sentence_label.configure(state="normal")
+            self._final_sentence_label.delete("1.0", "end")
+            self._final_sentence_label.configure(state="disabled")
         self._cam_placeholder.place(relx=0.5, rely=0.5, anchor="center")
         self._cam_label.configure(image=None)
 
@@ -340,6 +358,11 @@ class GestureDetectionPage(ctk.CTkFrame):
                     if (not self._gesture_history or
                             self._gesture_history[-1] != gesture):
                         self._add_to_history(gesture, confidence)
+                    # Sprint 5 — append to communication output buffer
+                    text_char = map_gesture_to_text(gesture)
+                    if self._text_buffer.append_if_new(text_char):
+                        self._sentence_builder.add_gesture(text_char, time.monotonic())
+                        self._refresh_output()
                     self._status_pill.configure(fg_color=C_SUCCESS_BG)
                     self._status_label.configure(
                         text=f"🟢  Gesture detected: {gesture}",
@@ -348,20 +371,44 @@ class GestureDetectionPage(ctk.CTkFrame):
                     self._gesture_label.configure(text="—")
                     self._gesture_name_label.configure(
                         text="Gesture unclear. Reposition your hand.")
+                    # Sprint 5 — auto-space on low-confidence pause
+                    if self._text_buffer.maybe_insert_space():
+                        self._refresh_output()
                     self._status_pill.configure(fg_color=C_WARN_BG)
                     self._status_label.configure(
                         text="⚠  Low confidence. Repeat gesture clearly.",
                         text_color=C_WARN)
             else:
+                # Sprint 5 — auto-space when gesture not recognized
+                if self._text_buffer.maybe_insert_space():
+                    self._refresh_output()
                 self._status_pill.configure(fg_color=C_WARN_BG)
                 self._status_label.configure(
                     text="🔍  Gesture not recognized.",
                     text_color=C_WARN)
         else:
+            # Sprint 5 — auto-space when no hand detected
+            if self._text_buffer.maybe_insert_space():
+                self._refresh_output()
             self._status_pill.configure(fg_color=C_WARN_BG)
             self._status_label.configure(
                 text="✋  No hand detected. Position hand in frame.",
                 text_color=C_WARN)
+
+        # Sprint 6 — Sentence finalization check
+        current_time = time.monotonic()
+        if self._sentence_builder.should_finalize(current_time):
+            final_sentence = self._sentence_builder.finalize()
+            if final_sentence:
+                self._final_sentence_label.configure(state="normal")
+                self._final_sentence_label.delete("1.0", "end")
+                self._final_sentence_label.insert("1.0", final_sentence)
+                self._final_sentence_label.configure(state="disabled")
+                tts_engine.speak(final_sentence)
+            
+            self._sentence_builder.reset()
+            self._text_buffer.clear()
+            self._refresh_output()
 
         self._display_frame(annotated_frame)
         self._update_job = self.after(self.UPDATE_INTERVAL, self._update_loop)
@@ -419,6 +466,72 @@ class GestureDetectionPage(ctk.CTkFrame):
         self._history_textbox.configure(state="normal")
         self._history_textbox.delete("1.0", "end")
         self._history_textbox.configure(state="disabled")
+
+    # ── Communication Output helpers (Sprint 5 — SD005) ────
+
+    def _build_output_panel(self, parent):
+        """Build the Communication Output panel at the top of the right panel."""
+        out_hdr = ctk.CTkFrame(parent, fg_color="transparent")
+        out_hdr.pack(fill="x", padx=20, pady=(16, 6))
+        ctk.CTkLabel(
+            out_hdr, text="💬  Communication Output",
+            font=(FONT_PRIMARY, 13, "bold"),
+            text_color=C_TEXT_DARK, fg_color="transparent"
+        ).pack(side="left")
+        ctk.CTkButton(
+            out_hdr, text="Clear", command=self._clear_output,
+            font=(FONT_PRIMARY, 11), fg_color="transparent",
+            hover_color=C_INPUT_BG, text_color=C_ACCENT,
+            width=50, height=24, corner_radius=4
+        ).pack(side="right")
+
+        self._output_textbox = ctk.CTkTextbox(
+            parent,
+            font=("Consolas", 20),
+            fg_color=C_INPUT_BG,
+            text_color=C_TEXT_DARK,
+            wrap="word",
+            height=60,
+            border_width=1, border_color=C_CARD_BORDER,
+            corner_radius=8
+        )
+        self._output_textbox.pack(fill="x", padx=20, pady=(0, 10))
+        self._output_textbox.configure(state="disabled")
+
+        # Sprint 6 - Final Sentence
+        ctk.CTkLabel(
+            parent, text="🧾  Final Sentence",
+            font=(FONT_PRIMARY, 13, "bold"),
+            text_color=C_TEXT_DARK, fg_color="transparent"
+        ).pack(fill="x", padx=20, pady=(0, 6), anchor="w")
+
+        self._final_sentence_label = ctk.CTkTextbox(
+            parent,
+            font=("Consolas", 20, "bold"),
+            fg_color=C_SUCCESS_BG,
+            text_color=C_TEXT_DARK,
+            wrap="word",
+            height=40,
+            border_width=1, border_color=C_SUCCESS,
+            corner_radius=8
+        )
+        self._final_sentence_label.pack(fill="x", padx=20, pady=(0, 10))
+        self._final_sentence_label.configure(state="disabled")
+
+    def _refresh_output(self):
+        """Sync the output textbox with the TextBuffer contents."""
+        text = self._text_buffer.get()
+        self._output_textbox.configure(state="normal")
+        self._output_textbox.delete("1.0", "end")
+        if text:
+            self._output_textbox.insert("1.0", text)
+        self._output_textbox.configure(state="disabled")
+        self._output_textbox.see("end")
+
+    def _clear_output(self):
+        """Clear the communication output buffer and textbox."""
+        self._text_buffer.clear()
+        self._refresh_output()
 
     def _on_back(self):
         self._stop_detection()
