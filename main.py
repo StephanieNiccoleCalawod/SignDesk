@@ -19,6 +19,10 @@ class SignDeskApp(ctk.CTk):
         
         # Apply theme globally
         apply_theme()
+        
+        from core.config import config
+        config.load()
+        
         self.configure(fg_color=C_BG)
 
         self.update_idletasks()
@@ -55,6 +59,51 @@ class SignDeskApp(ctk.CTk):
         self.resizable(False, False)
         self._set_size(900, 650)
         self._current_page = VerificationPage(self, self, pending_data)
+        self._current_page.pack(fill="both", expand=True)
+
+    def show_forgot_password(self):
+        """Navigate to the Forgot Password page (Step 1)."""
+        self._clear()
+        self.resizable(False, False)
+        self._set_size(900, 650)
+        from modules.auth.forgot_password_window import ForgotPasswordPage
+        self._current_page = ForgotPasswordPage(self, self)
+        self._current_page.pack(fill="both", expand=True)
+
+    def show_otp_verification(self, email: str):
+        """Navigate to the OTP Verification page (Step 2)."""
+        self._clear()
+        self.resizable(False, False)
+        self._set_size(900, 650)
+        from modules.auth.otp_verification_window import ForgotPasswordOTPPage
+        self._current_page = ForgotPasswordOTPPage(self, self, email)
+        self._current_page.pack(fill="both", expand=True)
+
+    def show_reset_password(self, email: str):
+        """Navigate to the Reset Password page (Step 3)."""
+        self._clear()
+        self.resizable(False, False)
+        self._set_size(900, 650)
+        from modules.auth.reset_password_window import ResetPasswordPage
+        self._current_page = ResetPasswordPage(self, self, email)
+        self._current_page.pack(fill="both", expand=True)
+
+    def show_settings(self, username: str):
+        self._current_user = username
+        self._clear()
+        self.resizable(True, True)
+        self._set_size(950, 680)
+        from modules.settings.ui import SettingsPage
+        self._current_page = SettingsPage(self, self, username)
+        self._current_page.pack(fill="both", expand=True)
+
+    def show_speech_output(self, username: str):
+        self._current_user = username
+        self._clear()
+        self.resizable(True, True)
+        self._set_size(950, 680)
+        from modules.speech.ui import SpeechOutputPage
+        self._current_page = SpeechOutputPage(self, self, username)
         self._current_page.pack(fill="both", expand=True)
 
     def show_dashboard(self, username: str):

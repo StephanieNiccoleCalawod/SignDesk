@@ -51,6 +51,17 @@ def update_database_schema():
             )
         """)
 
+        # OTP tokens table for password reset flow
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS otp_tokens (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                email      TEXT    NOT NULL,
+                otp_code   TEXT    NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                is_used    INTEGER DEFAULT 0
+            )
+        """)
+
         conn.commit()
         conn.close()
     except Exception as e:

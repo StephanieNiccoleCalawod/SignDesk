@@ -164,7 +164,8 @@ class LoginPage(ctk.CTkFrame):
             pw_header, text="Forgot password?",
             font=(FONT_PRIMARY, 10), fg_color="transparent",
             hover_color=C_INPUT_BG, text_color=C_ACCENT,
-            width=0, height=18, corner_radius=4
+            width=0, height=18, corner_radius=4,
+            command=lambda: self._app.show_forgot_password()
         ).pack(side="right")
 
         self._pass_entry = _make_entry(form_wrap, "Enter your password", show="●")

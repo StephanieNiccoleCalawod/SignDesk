@@ -25,8 +25,15 @@ from core.theme import (
 # SIDEBAR COMPONENTS (Dashboard)
 # ══════════════════════════════════════════════════════════════
 
-def _hex_to_rgb(hex_color: str):
+def resolve_color(color):
+    if isinstance(color, tuple):
+        mode = ctk.get_appearance_mode()
+        return color[1] if mode.lower() == "dark" else color[0]
+    return color
+
+def _hex_to_rgb(hex_color):
     """Convert '#RRGGBB' to (r, g, b) tuple."""
+    hex_color = resolve_color(hex_color)
     hex_color = hex_color.lstrip("#")
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
@@ -159,17 +166,17 @@ def create_step_card(parent, step_number: int, title: str,
     # Numbered circle badge
     badge_canvas = Canvas(
         inner, width=_STEP_BADGE_SIZE, height=_STEP_BADGE_SIZE,
-        highlightthickness=0, bd=0, bg=C_CARD_BG,
+        highlightthickness=0, bd=0, bg=resolve_color(C_CARD_BG),
     )
     cx = _STEP_BADGE_SIZE // 2
     cy = _STEP_BADGE_SIZE // 2
     r  = _STEP_BADGE_R
     badge_canvas.create_oval(
         cx - r, cy - r, cx + r, cy + r,
-        fill=_STEP_CARD_ACCENT, outline=_STEP_CARD_ACCENT,
+        fill=resolve_color(_STEP_CARD_ACCENT), outline=resolve_color(_STEP_CARD_ACCENT),
     )
     badge_canvas.create_text(
-        cx, cy, text=str(step_number), fill=C_WHITE,
+        cx, cy, text=str(step_number), fill=resolve_color(C_WHITE),
         font=(FONT_PRIMARY, 12, "bold"),
     )
     badge_canvas.pack(anchor="center", pady=(0, badge_gap))

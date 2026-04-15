@@ -29,6 +29,10 @@ class DashboardPage(ctk.CTkFrame):
     def _launch_gesture_detection(self):
         self._app.show_gesture_detection(self._username)
 
+    def _launch_settings(self):
+        if hasattr(self._app, 'show_settings'):
+            self._app.show_settings(self._username)
+
     def _on_logout(self):
         if messagebox.askyesno("Logout", "Are you sure you want to log out?"):
             self._app.show_login()
@@ -128,7 +132,7 @@ class DashboardPage(ctk.CTkFrame):
         bottom.pack(fill="x", padx=12, pady=(0, 20))
 
         create_nav_item(bottom, "⚙️", "Settings",
-                        is_active=False, command=None)
+                        is_active=False, command=self._launch_settings)
 
         logout_frame = ctk.CTkFrame(bottom, fg_color="transparent",
                                      corner_radius=10, height=38)

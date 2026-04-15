@@ -35,6 +35,10 @@ class CameraManager:
         - "Webcam device not detected. Please connect a webcam."
         - "Webcam permission denied. Please enable camera access."
         """
+        from core.config import config
+        if not config.webcam_enabled:
+            return False, "Webcam access is disabled. Please enable camera to continue gesture detection."
+
         try:
             self._cap = cv2.VideoCapture(self._camera_index, cv2.CAP_DSHOW)
 
