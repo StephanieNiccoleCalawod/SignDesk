@@ -175,9 +175,10 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
 
 def register_user(username: str, email: str, password: str) -> tuple[bool, str, str]:
     """
-    Creates a new user account as unverified. 
-    Generates a verification code and saves it to the database with an expiry.
-    Returns: (Success, Message, OTP_Code)
+    Legacy: Creates a new user account as unverified.
+    NOTE: This inserts into the DB before verification. Use the
+    in-memory OTP flow + create_verified_user() instead.
+    Kept for backwards compatibility only.
     """
     import random
     import string
@@ -224,6 +225,52 @@ def register_user(username: str, email: str, password: str) -> tuple[bool, str, 
 
     except Exception as e:
         return False, f"Database error: {str(e)}", ""
+
+
+def create_verified_user(username: str, email: str, password: str) -> tuple[bool, str]:
+    """
+    Creates a fully verified user account.
+    Called ONLY after OTP verification succeeds (in-memory check).
+    This ensures no orphan records are left if the user abandons verification.
+    Returns: (Success, Message)
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Final duplicate checks (safety — may have changed since form submission)
+        cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+        if cursor.fetchone():
+            conn.close()
+            return False, "This username already exists. Please go back and choose another."
+
+        cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+        if cursor.fetchone():
+            conn.close()
+            return False, "An account with this email already exists."
+
+        # Hash the password securely with bcrypt
+        password_hash = bcrypt.hashpw(
+            password.encode("utf-8"),
+            bcrypt.gensalt()
+        ).decode("utf-8")
+
+        # Insert as fully verified — no verification_code needed
+        cursor.execute(
+            """
+            INSERT INTO users (username, email, password_hash, email_verified)
+            VALUES (?, ?, ?, 1)
+            """,
+            (username, email, password_hash)
+        )
+
+        conn.commit()
+        conn.close()
+
+        return True, "Account created successfully."
+
+    except Exception as e:
+        return False, f"Database error: {str(e)}"
 
 def verify_user(email: str, entered_code: str) -> tuple[bool, str]:
     """
