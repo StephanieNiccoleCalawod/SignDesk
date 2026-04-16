@@ -118,3 +118,48 @@ PASSWORD_RULES = [
     ("special",   "At least 1 special character (!@#$%^& etc.)",
                   lambda p: bool(re.search(r"[!@#$%^&*()\+\-=\[\]{};':\"\\|,.<>\/?]", p))),
 ]
+
+
+# ── Theme Manager (Centralized Access) ─────────────────────
+class ThemeManager:
+    """Provides a single get_color() API over the existing COLORS dict."""
+
+    def __init__(self):
+        self._map = {
+            # Layout backgrounds
+            "bg_main":        COLORS["bg_secondary"],
+            "bg_card":        COLORS["bg_primary"],
+            "bg_sidebar":     COLORS["panel_left"],
+            "bg_input":       COLORS["input_bg"],
+
+            # Borders
+            "border":         COLORS["border"],
+            "input_border":   COLORS["input_border"],
+
+            # Text
+            "text_primary":   COLORS["text_primary"],
+            "text_secondary": COLORS["text_secondary"],
+            "text_muted":     COLORS["text_muted"],
+
+            # Accent / interactive
+            "primary":        COLORS["accent"],
+            "accent":         COLORS["accent"],
+            "accent_hover":   COLORS["accent_hover"],
+            "cyan":           COLORS["cyan"],
+
+            # Semantic
+            "success":        COLORS["success"],
+            "success_bg":     COLORS["success_bg"],
+            "error":          COLORS["error"],
+            "error_bg":       COLORS["error_bg"],
+            "warn":           COLORS["warn"],
+            "warn_bg":        COLORS["warn_bg"],
+            "info":           COLORS["info"],
+            "info_bg":        COLORS["info_bg"],
+        }
+
+    def get_color(self, key: str):
+        return self._map.get(key, ("#FFFFFF", "#FFFFFF"))
+
+
+theme = ThemeManager()

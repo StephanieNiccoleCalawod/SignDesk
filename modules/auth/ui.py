@@ -302,7 +302,7 @@ class RegisterPage(ctk.CTkFrame):
     def _build(self):
         make_left_panel(self).pack(side="left", fill="y")
 
-        right = ctk.CTkScrollableFrame(self, fg_color=C_WHITE, corner_radius=0)
+        right = ctk.CTkScrollableFrame(self, fg_color=C_CARD_BG, corner_radius=0)
         right.pack(side="left", fill="both", expand=True)
 
         form_wrap = ctk.CTkFrame(right, fg_color="transparent")

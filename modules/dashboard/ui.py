@@ -33,6 +33,9 @@ class DashboardPage(ctk.CTkFrame):
         if hasattr(self._app, 'show_settings'):
             self._app.show_settings(self._username)
 
+    def _launch_speech_output(self):
+        self._app.show_speech_output(self._username)
+
     def _on_logout(self):
         if messagebox.askyesno("Logout", "Are you sure you want to log out?"):
             self._app.show_login()
@@ -113,7 +116,7 @@ class DashboardPage(ctk.CTkFrame):
                         is_active=False,
                         command=self._launch_gesture_detection)
         create_nav_item(nav_frame, "🔊", "Speech Output",
-                        is_active=False, command=None)
+                        is_active=False, command=self._launch_speech_output)
         create_nav_item(nav_frame, "📖", "Sign Dictionary",
                         is_active=False, command=None)
         create_nav_item(nav_frame, "📈", "Session History",
@@ -168,7 +171,7 @@ class DashboardPage(ctk.CTkFrame):
         self._build_topbar(main)
 
         body = ctk.CTkScrollableFrame(
-            main, fg_color="transparent", corner_radius=0
+            main, fg_color=C_DASH_BG, corner_radius=0
         )
         body.pack(fill="both", expand=True, padx=28, pady=(8, 20))
 
@@ -310,7 +313,7 @@ class DashboardPage(ctk.CTkFrame):
 
             ("🔊", "Speech Output",
              "Convert recognized signs to spoken audio instantly.",
-             False, None,
+             True, self._launch_speech_output,
              C_BADGE_TEAL_BG,  C_BADGE_TEAL_FG),
 
             ("📖", "Sign Dictionary",

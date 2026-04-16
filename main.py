@@ -4,7 +4,7 @@ Main Application Entry Point
 """
 
 import customtkinter as ctk
-from core.theme import apply_theme, C_BG
+from core.theme import apply_theme, theme
 from modules.auth.ui import LoginPage, RegisterPage, VerificationPage
 from modules.dashboard.ui import DashboardPage
 from modules.vision.ui import GestureDetectionPage
@@ -22,8 +22,11 @@ class SignDeskApp(ctk.CTk):
         
         from core.config import config
         config.load()
+
+        from modules.settings.account_backend import init_account_db
+        init_account_db()
         
-        self.configure(fg_color=C_BG)
+        self.configure(fg_color=theme.get_color("bg_main"))
 
         self.update_idletasks()
         x = (self.winfo_screenwidth()  - 900) // 2

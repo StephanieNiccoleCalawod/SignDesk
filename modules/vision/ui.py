@@ -99,13 +99,12 @@ class GestureDetectionPage(ctk.CTkFrame):
         left_col.grid_rowconfigure(0, weight=1)
         left_col.grid_columnconfigure(0, weight=1)
 
-        right_col = ctk.CTkScrollableFrame(
+        right_col = ctk.CTkFrame(
             body,
             fg_color=COLORS["bg_secondary"],
             corner_radius=12
         )
         right_col.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
-        right_col.grid_columnconfigure(0, weight=1)
 
         # Build Panels inside wrappers
         self._build_camera_panel(left_col)
