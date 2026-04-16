@@ -311,11 +311,6 @@ class DashboardPage(ctk.CTkFrame):
              True,  self._launch_gesture_detection,
              C_BADGE_BLUE_BG,  C_BADGE_BLUE_FG),
 
-            ("🔊", "Speech Output",
-             "Convert recognized signs to spoken audio instantly.",
-             True, self._launch_speech_output,
-             C_BADGE_TEAL_BG,  C_BADGE_TEAL_FG),
-
             ("📖", "Sign Dictionary",
              "Browse and learn the full supported sign language vocabulary.",
              False, None,

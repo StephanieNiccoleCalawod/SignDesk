@@ -36,4 +36,10 @@ class GlobalSpeechBuffer:
         with self._buffer_lock:
             self._sentences.clear()
 
+    def remove_at(self, index: int) -> None:
+        """Remove one sentence by index."""
+        with self._buffer_lock:
+            if 0 <= index < len(self._sentences):
+                self._sentences.pop(index)
+
 speech_buffer = GlobalSpeechBuffer()
