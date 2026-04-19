@@ -10,7 +10,7 @@
     "speech.voice": "male",
     "speech.rate": 0.8,
     "speech.volume": 80,
-    "privacy.gesture_history_log": false,
+    "privacy.gesture_history_log": true,
     "privacy.local_only_processing": true,
     "accessibility.screen_reader_support": true,
     "accessibility.reduce_motion": false,

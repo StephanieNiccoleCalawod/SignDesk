@@ -36,6 +36,9 @@ class DashboardPage(ctk.CTkFrame):
     def _launch_speech_output(self):
         self._app.show_speech_output(self._username)
 
+    def _launch_gesture_history(self):
+        self._app.show_gesture_history(self._username)
+
     def _on_logout(self):
         if messagebox.askyesno("Logout", "Are you sure you want to log out?"):
             self._app.show_login()
@@ -119,8 +122,8 @@ class DashboardPage(ctk.CTkFrame):
                         is_active=False, command=self._launch_speech_output)
         create_nav_item(nav_frame, "📖", "Sign Dictionary",
                         is_active=False, command=None)
-        create_nav_item(nav_frame, "📈", "Session History",
-                        is_active=False, command=None)
+        create_nav_item(nav_frame, "📈", "Gesture History",
+                        is_active=False, command=self._launch_gesture_history)
 
         # Spacer
         ctk.CTkFrame(content, fg_color="transparent").pack(
@@ -316,9 +319,9 @@ class DashboardPage(ctk.CTkFrame):
              False, None,
              C_BADGE_AMBER_BG, C_BADGE_AMBER_FG),
 
-            ("📊", "Session History",
-             "Review your past sessions, accuracy scores, and progress.",
-             False, None,
+            ("📈", "Gesture History",
+             "Review every gesture you've signed — confidence scores and translations.",
+             True, self._launch_gesture_history,
              C_BADGE_GRAY_BG,  C_BADGE_GRAY_FG),
         ]
 

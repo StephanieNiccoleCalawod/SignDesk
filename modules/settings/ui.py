@@ -817,8 +817,11 @@ class SettingsPage(ctk.CTkFrame):
 
         var = ctk.BooleanVar(value=config.get("privacy.gesture_history_log", False))
 
+        from modules.gesture_history.backend import set_setting as _gh_set
+
         def _toggle_hist():
             config.set("privacy.gesture_history_log", var.get())
+            _gh_set("logging_enabled", "1" if var.get() else "0")
 
         ctk.CTkSwitch(
             right, text="", variable=var,
@@ -850,16 +853,26 @@ class SettingsPage(ctk.CTkFrame):
         # View saved gesture log
         right3 = self._row(card, "View saved gesture log",
                            "Browse or export your local history")
-        ctk.CTkLabel(
-            right3, text="›", font=(FONT_PRIMARY, 18),
-            text_color=_TEXT_MUT, fg_color="transparent"
-        ).pack()
+
+        def _open_log_viewer():
+            self._app.show_gesture_log_viewer(self._username)
+
+        arrow = ctk.CTkLabel(
+            right3, text="›", font=(FONT_PRIMARY, 20),
+            text_color=_TEXT_MUT, cursor="hand2"
+        )
+        arrow.pack()
+        arrow.bind("<Button-1>", lambda e: _open_log_viewer())
+        right3.master.configure(cursor="hand2")
+        right3.master.bind("<Button-1>", lambda e: _open_log_viewer())
         self._row_divider(card)
 
         # Clear history
         self._cleared = False
 
         def _clear_history():
+            from modules.gesture_history.backend import clear_history as _gh_clear
+            _gh_clear()
             self._cleared = True
             clear_btn.pack_forget()
             cleared_lbl = ctk.CTkLabel(

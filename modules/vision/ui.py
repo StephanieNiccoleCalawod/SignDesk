@@ -32,6 +32,7 @@ from modules.text.mapper import map_gesture_to_text
 from modules.text.buffer import TextBuffer
 from modules.sentence.builder import SentenceBuilder
 from modules.speech.buffer import speech_buffer
+from modules.speech.word_assembler import word_assembler
 from modules.speech.tts import TTSEngine
 
 
@@ -53,7 +54,7 @@ class GestureDetectionPage(ctk.CTkFrame):
         self._tracker         = HandTracker()
         self._recognizer      = GestureRecognizer()
         self._text_buffer     = TextBuffer()
-        self._sentence_builder = SentenceBuilder(timeout=2.0)
+        self._sentence_builder = SentenceBuilder(timeout=4.0)
 
         self._is_detecting        = False
         self._update_job          = None
@@ -65,6 +66,9 @@ class GestureDetectionPage(ctk.CTkFrame):
 
         # TTS engine (from SpeechOutputPage)
         self.tts = TTSEngine(on_error=self._handle_tts_error)
+
+        # Inject TTS into assembler ONCE at page creation
+        word_assembler.set_tts(self.tts)
 
         self._build()
 
@@ -297,6 +301,14 @@ class GestureDetectionPage(ctk.CTkFrame):
         )
         self._conf_bar.pack(fill="x")
         self._conf_bar.set(0)
+
+        # Hold Progress Bar
+        self._hold_progress_bar = ctk.CTkProgressBar(
+            conf_frame, height=4, corner_radius=2,
+            progress_color=COLORS["badge_gray_bg"], fg_color=COLORS["border"]
+        )
+        self._hold_progress_bar.pack(fill="x", pady=(8, 0))
+        self._hold_progress_bar.set(0)
 
         self._conf_warning = ctk.CTkLabel(
             panel, text="", font=(FONT_PRIMARY, 11),
@@ -635,6 +647,7 @@ class GestureDetectionPage(ctk.CTkFrame):
 
         self._text_buffer.clear()
         self._sentence_builder.reset()
+        word_assembler.cancel()
         self._refresh_output()
         if hasattr(self, "_final_sentence_label"):
             self._final_sentence_label.configure(state="normal")
@@ -650,6 +663,8 @@ class GestureDetectionPage(ctk.CTkFrame):
 
     def _toggle_live_speech(self):
         self._live_speech_enabled = not self._live_speech_enabled
+        word_assembler.set_live_speech(self._live_speech_enabled)
+        
         if self._live_speech_enabled:
             self._live_speech_btn.configure(
                 text="🔊  Live Speech: ON",
@@ -663,6 +678,45 @@ class GestureDetectionPage(ctk.CTkFrame):
                 hover_color=COLORS["input_bg"],
             )
 
+    def _update_hold_bar(self, progress: float):
+        """
+        Updates the hold progress bar color based on hold progress.
+
+        Progress states:
+          0.0       = no gesture / idle       → gray
+          0.0–1.0   = holding in progress     → warn (amber)
+          1.0       = hold confirmed          → success (green)
+
+        Wrapped in try/except so a bad color key never
+        crashes the Tkinter callback and freezes the camera.
+        """
+        try:
+            self._hold_progress_bar.set(progress)
+
+            if progress >= 1.0:
+                # Hold confirmed — green
+                self._hold_progress_bar.configure(
+                    progress_color=COLORS["success"]
+                )
+            elif progress > 0.0:
+                # Holding in progress — amber
+                # ✅ FIXED: was COLORS["warning"] → KeyError every frame
+                self._hold_progress_bar.configure(
+                    progress_color=COLORS["warn"]
+                )
+            else:
+                # No gesture — gray
+                self._hold_progress_bar.configure(
+                    progress_color=COLORS["badge_gray_bg"]
+                )
+
+        except KeyError as e:
+            # Safety net: bad color key should never freeze the camera
+            print(f"[UI] WARNING: Missing color key in _update_hold_bar: {e}")
+        except Exception as e:
+            # Any other UI error — log and continue, never crash the loop
+            print(f"[UI] WARNING: _update_hold_bar failed: {e}")
+
     def _update_loop(self):
         if not self._is_detecting:
             return
@@ -670,7 +724,10 @@ class GestureDetectionPage(ctk.CTkFrame):
         success, frame, fps = self._camera.read_frame()
 
         if not success or frame is None:
-            self._set_status_pill("⚠  Camera feed interrupted", COLORS["error_bg"], COLORS["error"])
+            self._set_status_pill(
+                "⚠  Camera feed interrupted",
+                COLORS["error_bg"], COLORS["error"]
+            )
             self._update_job = self.after(self.UPDATE_INTERVAL, self._update_loop)
             return
 
@@ -679,44 +736,96 @@ class GestureDetectionPage(ctk.CTkFrame):
 
         if hand_detected and landmarks:
             gesture, confidence = self._recognizer.recognize(landmarks)
+
+            # Update hold progress bar every frame regardless of state
+            progress = self._recognizer.hold_progress
+            self._update_hold_bar(progress)
+
+            # Get hold state BEFORE branching
+            current = self._recognizer.current_hold_gesture
+
+            # ── STATE A: Hold complete — gesture committed ─────────────────
             if gesture is not None:
                 self._update_confidence(confidence)
-                if confidence >= self._recognizer.CONFIDENCE_THRESHOLD:
-                    self._gesture_label.configure(text=gesture)
-                    self._gesture_name_label.configure(text=f"ASL Letter: {gesture}")
-                    if not self._gesture_history or self._gesture_history[-1] != gesture:
-                        self._add_to_history(gesture, confidence)
 
-                    text_char = map_gesture_to_text(gesture)
-                    if self._text_buffer.append_if_new(text_char):
-                        self._sentence_builder.add_gesture(text_char, time.monotonic())
-                        self._refresh_output()
-                        if self._live_speech_enabled and not self._tts_speaking and text_char != self._last_spoken_char:
-                            self._last_spoken_char = text_char
-                            self._tts_speaking = True
-                            threading.Thread(
-                                target=self._speak_async,
-                                args=(text_char,),
-                                daemon=True
-                            ).start()
+                if not self._gesture_history or \
+                   self._gesture_history[-1] != gesture:
+                    self._add_to_history(gesture, confidence)
 
-                    self._set_status_pill(f"🟢  Gesture detected: {gesture}", COLORS["success_bg"], COLORS["success"])
-                else:
-                    self._gesture_label.configure(text="—")
-                    self._gesture_name_label.configure(text="Gesture unclear")
-                    if self._text_buffer.maybe_insert_space():
-                        self._refresh_output()
-                    self._set_status_pill("⚠  Low confidence", COLORS["warn_bg"], COLORS["warn"])
+                text_char = map_gesture_to_text(gesture)
+                if self._text_buffer.append_if_new(text_char):
+                    self._sentence_builder.add_gesture(
+                        text_char, time.monotonic()
+                    )
+                    self._refresh_output()
+                    if self._live_speech_enabled:
+                        word_assembler.add_letter(text_char)
+
+                self._recognizer.reset_hold()
+                self._gesture_label.configure(text=gesture)
+                self._gesture_name_label.configure(
+                    text=f"ASL Letter: {gesture}"
+                )
+                self._set_status_pill(
+                    f"🟢  Gesture committed: {gesture}",
+                    COLORS["success_bg"], COLORS["success"]
+                )
+                print(f"[UI] State A — committed: '{gesture}'")
+
+            # ── STATE B: Hold in progress — user actively signing ──────────
+            elif current is not None:
+                # DO NOT call add_space() — hold is in progress
+                # DO NOT reset confidence bar
+                # DO NOT show "Gesture unclear"
+                self._gesture_label.configure(text=current)
+                self._gesture_name_label.configure(
+                    text=f"ASL Letter: {current}"
+                )
+                self._set_status_pill(
+                    f"⏳  Holding: {current}...",
+                    COLORS["info_bg"], COLORS["info"]
+                )
+                print(
+                    f"[UI] State B — holding '{current}' "
+                    f"({self._recognizer.hold_progress * 100:.0f}%)"
+                )
+
+            # ── STATE C: Truly no gesture — safe to insert space ───────────
             else:
+                self._gesture_label.configure(text="—")
+                self._gesture_name_label.configure(text="Gesture unclear")
+                self._update_confidence(0.0)   # safe to reset here only
+
                 if self._text_buffer.maybe_insert_space():
                     self._refresh_output()
-                self._set_status_pill("🔍  Analyzing...", COLORS["info_bg"], COLORS["info"])
+                    if self._live_speech_enabled:
+                        word_assembler.add_space()  # safe — no hold active
+
+                self._set_status_pill(
+                    "🔍  Analyzing...",
+                    COLORS["info_bg"], COLORS["info"]
+                )
+                print("[UI] State C — no gesture, inserting space if needed")
+
         else:
+            # ── NO HAND in frame ───────────────────────────────────────────
+            self._gesture_label.configure(text="—")
+            self._gesture_name_label.configure(text="Gesture unclear")
+            self._update_confidence(0.0)
+            self._update_hold_bar(0.0)   # reset progress bar
+
             if self._text_buffer.maybe_insert_space():
                 self._refresh_output()
-            self._set_status_pill("🔵  No hand detected", COLORS["info_bg"], COLORS["info"])
+                if self._live_speech_enabled:
+                    word_assembler.add_space()
 
-        # Sentence finalization — push to buffer + refresh speech panel
+            self._set_status_pill(
+                "🔵  No hand detected",
+                COLORS["info_bg"], COLORS["info"]
+            )
+            print("[UI] No hand — space inserted if needed")
+
+        # ── Sentence finalization ──────────────────────────────────────────
         current_time = time.monotonic()
         if self._sentence_builder.should_finalize(current_time):
             final_sentence = self._sentence_builder.finalize()
@@ -727,13 +836,6 @@ class GestureDetectionPage(ctk.CTkFrame):
                 self._final_sentence_label.configure(state="disabled")
                 speech_buffer.push(final_sentence)
                 self._refresh_sentences()
-                if self._live_speech_enabled and not self._tts_speaking:
-                    self._tts_speaking = True
-                    threading.Thread(
-                        target=self._speak_async,
-                        args=(final_sentence,),
-                        daemon=True
-                    ).start()
 
             self._sentence_builder.reset()
             self._text_buffer.clear()
@@ -818,6 +920,7 @@ class GestureDetectionPage(ctk.CTkFrame):
 
     def destroy(self):
         self._stop_detection()
+        word_assembler.cancel()
         try:
             self._tracker.release()
         except Exception:

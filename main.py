@@ -126,6 +126,24 @@ class SignDeskApp(ctk.CTk):
         self._current_page = GestureDetectionPage(self, self, username)
         self._current_page.pack(fill="both", expand=True)
 
+    def show_gesture_history(self, username: str):
+        self._current_user = username
+        self._clear()
+        self.resizable(True, True)
+        self._set_size(950, 680)
+        from modules.gesture_history.page import GestureHistoryPage
+        self._current_page = GestureHistoryPage(self, self, username)
+        self._current_page.pack(fill="both", expand=True)
+
+    def show_gesture_log_viewer(self, username: str):
+        self._current_user = username
+        self._clear()
+        self.resizable(True, True)
+        self._set_size(950, 680)
+        from modules.gesture_history.log_viewer import GestureLogViewerPage
+        self._current_page = GestureLogViewerPage(self, self, username)
+        self._current_page.pack(fill="both", expand=True)
+
     def _set_size(self, width: int, height: int):
         """Resize and re-center the window."""
         x = (self.winfo_screenwidth() - width) // 2

@@ -66,6 +66,7 @@ def _resolve_voice_id(engine, preference: str) -> str | None:
 class TTSEngine:
     def __init__(self, on_error=None):
         self._available = False
+        self._speak_lock = threading.Lock()
         self.on_error = on_error
         self._init_engine()
 
@@ -73,6 +74,7 @@ class TTSEngine:
         try:
             engine = pyttsx3.init()
             engine.setProperty("rate", 150)
+            engine.stop()
             self._available = True
         except Exception as e:
             print(f"TTS initialization failed: {e}")
@@ -97,34 +99,45 @@ class TTSEngine:
                 )
             return
 
-        try:
-            # Re-initialize in thread — required by pyttsx3 on Windows (COM threading)
-            engine = pyttsx3.init()
+        # Serialize TTS calls — pyttsx3 COM engines crash when
+        # two instances run concurrently on Windows.
+        with self._speak_lock:
+            engine = None
+            try:
+                # Re-initialize in thread — required by pyttsx3 on Windows (COM threading)
+                engine = pyttsx3.init()
 
-            # ── Rate ──────────────────────────────────────────
-            # config stores a multiplier (0.5 – 2.0); base rate is 150 wpm
-            rate_mult = config.get("speech.rate", 1.0)
-            engine.setProperty("rate", int(150 * rate_mult))
+                # ── Rate ──────────────────────────────────────────
+                # config stores a multiplier (0.5 – 2.0); base rate is 150 wpm
+                rate_mult = config.get("speech.rate", 1.0)
+                engine.setProperty("rate", int(150 * rate_mult))
 
-            # ── Volume ────────────────────────────────────────
-            # config stores 0 – 100; pyttsx3 expects 0.0 – 1.0
-            volume = config.get("speech.volume", 80)
-            engine.setProperty("volume", volume / 100.0)
+                # ── Volume ────────────────────────────────────────
+                # config stores 0 – 100; pyttsx3 expects 0.0 – 1.0
+                volume = config.get("speech.volume", 80)
+                engine.setProperty("volume", volume / 100.0)
 
-            # ── Voice ─────────────────────────────────────────
-            # config stores "default" | "female" | "male"
-            preference = config.get("speech.voice", "default")
-            voice_id = _resolve_voice_id(engine, preference)
-            if voice_id:
-                engine.setProperty("voice", voice_id)
+                # ── Voice ─────────────────────────────────────────
+                # config stores "default" | "female" | "male"
+                preference = config.get("speech.voice", "default")
+                voice_id = _resolve_voice_id(engine, preference)
+                if voice_id:
+                    engine.setProperty("voice", voice_id)
 
-            engine.say(text)
-            engine.runAndWait()
+                engine.say(text)
+                engine.runAndWait()
 
-        except Exception as e:
-            print(f"TTS speak failed: {e}")
-            if self.on_error:
-                self.on_error("Text-to-Speech engine failed to generate audio output.")
+            except Exception as e:
+                print(f"TTS speak failed: {e}")
+                if self.on_error:
+                    self.on_error("Text-to-Speech engine failed to generate audio output.")
+            finally:
+                # Release COM resources to prevent leaks
+                if engine is not None:
+                    try:
+                        engine.stop()
+                    except Exception:
+                        pass
 
     def speak(self, text: str):
         """
