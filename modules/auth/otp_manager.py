@@ -35,13 +35,12 @@ def check_email_exists(email: str) -> tuple[bool, str]:
     Returns (True, "") if found, (False, "error message") if not.
     """
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT 1 FROM users WHERE email = ?", (email,)
-        )
-        row = cursor.fetchone()
-        conn.close()
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM users WHERE email = ?", (email,)
+            )
+            row = cursor.fetchone()
 
         if row is None:
             return False, "No account found with this email address."
@@ -65,23 +64,20 @@ def create_otp(email: str) -> str:
     otp_code = generate_otp()
     expiry = _get_reset_otp_expiry()
 
-    conn = get_connection()
-    cursor = conn.cursor()
+    with get_connection() as conn:
+        cursor = conn.cursor()
 
-    # Invalidate all previous unused tokens for this email
-    cursor.execute(
-        "UPDATE otp_tokens SET is_used = 1 WHERE email = ? AND is_used = 0",
-        (email,)
-    )
+        # Invalidate all previous unused tokens for this email
+        cursor.execute(
+            "UPDATE otp_tokens SET is_used = 1 WHERE email = ? AND is_used = 0",
+            (email,)
+        )
 
-    # Insert new token
-    cursor.execute(
-        "INSERT INTO otp_tokens (email, otp_code, expires_at, is_used) VALUES (?, ?, ?, 0)",
-        (email, otp_code, expiry)
-    )
-
-    conn.commit()
-    conn.close()
+        # Insert new token
+        cursor.execute(
+            "INSERT INTO otp_tokens (email, otp_code, expires_at, is_used) VALUES (?, ?, ?, 0)",
+            (email, otp_code, expiry)
+        )
 
     return otp_code
 
@@ -97,22 +93,21 @@ def verify_otp(email: str, code: str) -> tuple[bool, str]:
     Does NOT mark the token as used — that happens in update_password().
     """
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_connection() as conn:
+            cursor = conn.cursor()
 
-        # Get the most recent unused token for this email
-        cursor.execute(
-            """
-            SELECT id, otp_code, expires_at
-            FROM   otp_tokens
-            WHERE  email = ? AND is_used = 0
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (email,)
-        )
-        row = cursor.fetchone()
-        conn.close()
+            # Get the most recent unused token for this email
+            cursor.execute(
+                """
+                SELECT id, otp_code, expires_at
+                FROM   otp_tokens
+                WHERE  email = ? AND is_used = 0
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (email,)
+            )
+            row = cursor.fetchone()
 
         if row is None:
             return False, "No active verification code found. Please request a new one."
@@ -140,14 +135,12 @@ def verify_otp(email: str, code: str) -> tuple[bool, str]:
 def invalidate_otp(email: str):
     """Marks all OTP tokens for this email as used."""
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE otp_tokens SET is_used = 1 WHERE email = ?",
-            (email,)
-        )
-        conn.commit()
-        conn.close()
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE otp_tokens SET is_used = 1 WHERE email = ?",
+                (email,)
+            )
     except Exception as e:
         print(f"OTP invalidation error: {e}")
 
@@ -162,7 +155,6 @@ def update_password(email: str, new_password: str) -> tuple[bool, str]:
     and invalidates all OTP tokens for this email.
     Returns (True, "success") or (False, "error message").
     """
-    conn = None
     try:
         # Hash the new password
         password_hash = bcrypt.hashpw(
@@ -170,30 +162,25 @@ def update_password(email: str, new_password: str) -> tuple[bool, str]:
             bcrypt.gensalt()
         ).decode("utf-8")
 
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_connection() as conn:
+            cursor = conn.cursor()
 
-        # Update the password and auto-verify email (receiving OTP proves ownership)
-        cursor.execute(
-            "UPDATE users SET password_hash = ?, email_verified = 1 WHERE email = ?",
-            (password_hash, email)
-        )
+            # Update the password and auto-verify email (receiving OTP proves ownership)
+            cursor.execute(
+                "UPDATE users SET password_hash = ?, email_verified = 1 WHERE email = ?",
+                (password_hash, email)
+            )
 
-        if cursor.rowcount == 0:
-            return False, "Account not found."
+            if cursor.rowcount == 0:
+                return False, "Account not found."
 
-        conn.commit()
-
-        # Verify the write persisted (read back the hash)
-        cursor.execute(
-            "SELECT password_hash FROM users WHERE email = ?", (email,)
-        )
-        verify_row = cursor.fetchone()
-        if verify_row is None or verify_row[0] != password_hash:
-            return False, "Password update failed — verification read mismatch."
-
-        conn.close()
-        conn = None
+            # Verify the write persisted (read back the hash)
+            cursor.execute(
+                "SELECT password_hash FROM users WHERE email = ?", (email,)
+            )
+            verify_row = cursor.fetchone()
+            if verify_row is None or verify_row[0] != password_hash:
+                return False, "Password update failed — verification read mismatch."
 
         # Invalidate all OTP tokens for this email
         invalidate_otp(email)
@@ -202,10 +189,3 @@ def update_password(email: str, new_password: str) -> tuple[bool, str]:
 
     except Exception as e:
         return False, f"Database error: {str(e)}"
-
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass

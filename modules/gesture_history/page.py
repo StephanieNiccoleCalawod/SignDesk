@@ -86,8 +86,9 @@ class GestureHistoryPage(ctk.CTkFrame):
             text_color=COLORS["text_primary"], fg_color="transparent", anchor="w"
         ).pack(fill="x", pady=(0, 16))
 
-        # The 2×2 section widget
-        section = GestureHistorySection(body)
+        # The 2×2 section widget — scoped to current user
+        user_id = getattr(self._app, 'current_user_id', None)
+        section = GestureHistorySection(body, user_id=user_id)
         section.pack(fill="both", expand=True)
 
     # ── Navigation ─────────────────────────────────────────────────────────────

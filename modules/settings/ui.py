@@ -618,29 +618,53 @@ class SettingsPage(ctk.CTkFrame):
             messagebox.showerror("Display Name", msg)
 
     def _on_change_password(self):
-        """Open an in-app password change dialog."""
-        from modules.settings.account_backend import update_password
+        """Open an in-app OTP-verified password change dialog."""
+        from modules.settings.account_backend import update_password, verify_password
+        from modules.auth.otp_manager import create_otp, verify_otp, invalidate_otp
+        from core.email_service import send_verification_email, ResendTracker
 
         if not hasattr(self, '_session') or not self._session.is_logged_in:
             messagebox.showerror("Error", "Session not available.")
             return
 
+        user_email = self._user_email
+        if not user_email:
+            messagebox.showerror("Error", "No email address on file.")
+            return
+
+        # Mask email for display: t***@gmail.com
+        parts = user_email.split("@")
+        if len(parts) == 2 and len(parts[0]) > 1:
+            masked_email = parts[0][0] + "***@" + parts[1]
+        else:
+            masked_email = user_email
+
+        resend_tracker = ResendTracker()
+        otp_attempts = [0]
+        max_otp_attempts = 5
+
         dlg = ctk.CTkToplevel(self)
         dlg.title("Change Password")
-        dlg.geometry("400x400")
+        dlg.geometry("430x520")
         dlg.resizable(False, False)
         dlg.grab_set()
         dlg.configure(fg_color=_CARD_BG)
+        dlg.after(10, lambda: self._center_dialog(dlg, 430, 520))
 
-        # Center over main window
-        dlg.after(10, lambda: self._center_dialog(dlg, 400, 400))
-
+        # ── Title ────────────────────────────────────────────
         ctk.CTkLabel(
             dlg, text="Change Password",
             font=(FONT_PRIMARY, 16, "bold"),
             text_color=_TEXT_PRI, fg_color="transparent"
-        ).pack(padx=24, pady=(20, 16), anchor="w")
+        ).pack(padx=24, pady=(20, 4), anchor="w")
 
+        ctk.CTkLabel(
+            dlg, text="Step 1: Verify your identity",
+            font=(FONT_PRIMARY, 11), text_color=_TEXT_MUT,
+            fg_color="transparent"
+        ).pack(padx=24, anchor="w", pady=(0, 12))
+
+        # ── Password fields ──────────────────────────────────
         fields = {}
         for lbl, key in [
             ("Current password", "current"),
@@ -653,12 +677,12 @@ class SettingsPage(ctk.CTkFrame):
                 fg_color="transparent"
             ).pack(padx=24, anchor="w", pady=(0, 4))
             entry = ctk.CTkEntry(
-                dlg, show="\u25cf", font=FONT_INPUT,
-                fg_color=_INPUT_BG, border_color=_INPUT_BORDER,
+                dlg, show="\u25cf", font=(FONT_PRIMARY, 13),
+                fg_color=_INPUT_BG, border_color=COLORS.get("input_border", _CARD_BORDER),
                 border_width=1, text_color=_TEXT_PRI,
                 height=38, corner_radius=8,
             )
-            entry.pack(fill="x", padx=24, pady=(0, 10))
+            entry.pack(fill="x", padx=24, pady=(0, 8))
             fields[key] = entry
 
         ctk.CTkLabel(
@@ -667,45 +691,216 @@ class SettingsPage(ctk.CTkFrame):
             fg_color="transparent"
         ).pack(padx=24, anchor="w")
 
-        err_label = ctk.CTkLabel(
+        # ── Status / error label ─────────────────────────────
+        status_label = ctk.CTkLabel(
             dlg, text="",
-            font=(FONT_PRIMARY, 11), text_color=COLORS["error"],
+            font=(FONT_PRIMARY, 11), text_color=_ERROR,
+            fg_color="transparent", wraplength=380
+        )
+        status_label.pack(padx=24, pady=(6, 0), anchor="w")
+
+        def _set_status(msg, is_error=True):
+            status_label.configure(
+                text=msg,
+                text_color=_ERROR if is_error else _SUCCESS
+            )
+
+        # ── OTP section (hidden initially) ───────────────────
+        otp_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+
+        ctk.CTkLabel(
+            otp_frame, text="Step 2: Enter verification code",
+            font=(FONT_PRIMARY, 11, "bold"), text_color=_ACCENT,
+            fg_color="transparent"
+        ).pack(anchor="w", pady=(0, 4))
+
+        otp_hint_label = ctk.CTkLabel(
+            otp_frame,
+            text=f"A 6-digit code was sent to {masked_email}",
+            font=(FONT_PRIMARY, 10), text_color=_TEXT_MUT,
             fg_color="transparent"
         )
-        err_label.pack(padx=24, pady=(8, 0), anchor="w")
+        otp_hint_label.pack(anchor="w", pady=(0, 8))
 
+        otp_entry = ctk.CTkEntry(
+            otp_frame, placeholder_text="Enter 6-digit code",
+            font=(FONT_PRIMARY, 16), fg_color=_INPUT_BG,
+            border_color=_ACCENT, border_width=1,
+            text_color=_TEXT_PRI, height=42, corner_radius=8,
+            justify="center"
+        )
+        otp_entry.pack(fill="x", pady=(0, 8))
+
+        otp_btn_row = ctk.CTkFrame(otp_frame, fg_color="transparent")
+        otp_btn_row.pack(fill="x")
+
+        # ── Button row (bottom) ──────────────────────────────
         btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
-        btn_row.pack(fill="x", padx=24, pady=(12, 20))
+        btn_row.pack(fill="x", side="bottom", padx=24, pady=(0, 20))
 
-        def _do_save():
+        # ── Phase control ────────────────────────────────────
+        # References to buttons so we can swap them between phases
+        phase1_buttons = ctk.CTkFrame(btn_row, fg_color="transparent")
+        phase2_buttons = ctk.CTkFrame(btn_row, fg_color="transparent")
+
+        def _send_otp():
+            """Phase 1 → Phase 2: Validate passwords, send OTP, show OTP input."""
+            current_pw = fields["current"].get()
+            new_pw = fields["new"].get()
+            confirm_pw = fields["confirm"].get()
+
+            # Client-side validation
+            if not current_pw or not new_pw or not confirm_pw:
+                _set_status("\u26a0  All password fields are required.")
+                return
+
+            # Pre-validate via backend (checks current pw, strength, match)
             ok, msg = update_password(
+                self._session.user_id, current_pw, new_pw, confirm_pw,
+                dry_run=True
+            )
+            if not ok:
+                _set_status(f"\u26a0  {msg}")
+                return
+
+            # Send OTP
+            _set_status("Sending verification code...", is_error=False)
+            dlg.update_idletasks()
+
+            try:
+                otp_code = create_otp(user_email)
+                email_ok, email_msg = send_verification_email(user_email, otp_code)
+            except Exception as e:
+                _set_status(f"\u26a0  Failed to send code: {e}")
+                return
+
+            if not email_ok:
+                _set_status(f"\u26a0  {email_msg}")
+                return
+
+            resend_tracker.record_resend()
+
+            # Lock password fields
+            for entry in fields.values():
+                entry.configure(state="disabled")
+
+            # Show OTP section
+            otp_frame.pack(fill="x", padx=24, pady=(8, 0), before=btn_row)
+            otp_entry.focus()
+
+            # Swap buttons: hide Send OTP, show Verify
+            phase1_buttons.pack_forget()
+            phase2_buttons.pack(fill="x")
+
+            _set_status(f"\u2709  Code sent to {masked_email}", is_error=False)
+
+        def _resend_otp():
+            """Resend OTP with cooldown check."""
+            can, reason = resend_tracker.can_resend()
+            if not can:
+                _set_status(f"\u26a0  {reason}")
+                return
+
+            _set_status("Resending code...", is_error=False)
+            dlg.update_idletasks()
+
+            try:
+                otp_code = create_otp(user_email)
+                email_ok, email_msg = send_verification_email(user_email, otp_code)
+            except Exception as e:
+                _set_status(f"\u26a0  Failed to resend: {e}")
+                return
+
+            if not email_ok:
+                _set_status(f"\u26a0  {email_msg}")
+                return
+
+            resend_tracker.record_resend()
+            _set_status(f"\u2709  New code sent to {masked_email}", is_error=False)
+
+        def _verify_and_save():
+            """Phase 2: Verify OTP, then update password."""
+            code = otp_entry.get().strip()
+            if not code or len(code) != 6 or not code.isdigit():
+                _set_status("\u26a0  Please enter a valid 6-digit code.")
+                return
+
+            otp_attempts[0] += 1
+            if otp_attempts[0] > max_otp_attempts:
+                _set_status(f"\u26a0  Too many attempts. Please close and try again.")
+                return
+
+            ok, msg = verify_otp(user_email, code)
+            if not ok:
+                remaining = max_otp_attempts - otp_attempts[0]
+                _set_status(f"\u26a0  {msg} ({remaining} attempt{'s' if remaining != 1 else ''} left)")
+                otp_entry.delete(0, "end")
+                return
+
+            # OTP valid — now execute the password update
+            pw_ok, pw_msg = update_password(
                 self._session.user_id,
                 fields["current"].get(),
                 fields["new"].get(),
                 fields["confirm"].get(),
             )
-            if not ok:
-                err_label.configure(text=f"\u26a0  {msg}")
+
+            # Invalidate all OTPs for this email regardless of outcome
+            invalidate_otp(user_email)
+
+            if not pw_ok:
+                _set_status(f"\u26a0  {pw_msg}")
                 return
+
             dlg.destroy()
-            messagebox.showinfo("Password Changed", msg)
+            messagebox.showinfo("Password Changed",
+                                "Your password has been updated successfully.")
 
+        # ── Build phase 1 buttons ────────────────────────────
         ctk.CTkButton(
-            btn_row, text="Save password",
-            font=(FONT_PRIMARY, 12, "bold"),
-            fg_color=_ACCENT, hover_color=_ACCENT_HOVER,
-            text_color=("#FFFFFF", "#FFFFFF"),
-            width=130, height=36, corner_radius=8,
-            command=_do_save
-        ).pack(side="right")
-
-        ctk.CTkButton(
-            btn_row, text="Cancel",
+            phase1_buttons, text="Cancel",
             font=(FONT_PRIMARY, 12),
             fg_color="transparent", hover_color=_INPUT_BG,
             text_color=_TEXT_SEC, width=80, height=36,
             corner_radius=8, command=dlg.destroy
-        ).pack(side="right", padx=(0, 8))
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            phase1_buttons, text="\u2709  Send OTP",
+            font=(FONT_PRIMARY, 12, "bold"),
+            fg_color=_ACCENT, hover_color=_ACCENT_HOVER,
+            text_color=("#FFFFFF", "#FFFFFF"),
+            width=130, height=36, corner_radius=8,
+            command=_send_otp
+        ).pack(side="right")
+
+        phase1_buttons.pack(fill="x")
+
+        # ── Build phase 2 buttons ────────────────────────────
+        ctk.CTkButton(
+            phase2_buttons, text="Cancel",
+            font=(FONT_PRIMARY, 12),
+            fg_color="transparent", hover_color=_INPUT_BG,
+            text_color=_TEXT_SEC, width=80, height=36,
+            corner_radius=8, command=dlg.destroy
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            phase2_buttons, text="\u2713  Verify \u0026 Save",
+            font=(FONT_PRIMARY, 12, "bold"),
+            fg_color=_ACCENT, hover_color=_ACCENT_HOVER,
+            text_color=("#FFFFFF", "#FFFFFF"),
+            width=130, height=36, corner_radius=8,
+            command=_verify_and_save
+        ).pack(side="right")
+
+        ctk.CTkButton(
+            phase2_buttons, text="Resend code",
+            font=(FONT_PRIMARY, 11),
+            fg_color="transparent", hover_color=_INPUT_BG,
+            text_color=_ACCENT, width=100, height=36,
+            corner_radius=8, command=_resend_otp
+        ).pack(side="left")
 
     def _center_dialog(self, dlg, w, h):
         try:
@@ -833,20 +1028,10 @@ class SettingsPage(ctk.CTkFrame):
 
         self._row_divider(card)
 
-        # Local-only processing — always on
+        # Local-only processing — always on (read-only, no toggle)
         right2 = self._row(card, "Local-only processing",
                            "No data is ever sent to external servers")
         self._badge(right2, "Always on", "green")
-
-        ctk.CTkSwitch(
-            right2, text="",
-            switch_width=44, switch_height=22,
-            progress_color=_ACCENT, button_color=("#FFFFFF", "#FFFFFF"),
-            fg_color=("#CBD5E1", "#444458"),
-            state="disabled",
-        ).pack(side="right")
-        # Force it on
-        right2.winfo_children()[-1].select()
 
         self._row_divider(card)
 
@@ -867,12 +1052,14 @@ class SettingsPage(ctk.CTkFrame):
         right3.master.bind("<Button-1>", lambda e: _open_log_viewer())
         self._row_divider(card)
 
-        # Clear history
+        # Clear history — with confirmation dialog
         self._cleared = False
 
-        def _clear_history():
+        def _do_clear():
+            """Actually performs the hard delete after confirmation."""
             from modules.gesture_history.backend import clear_history as _gh_clear
-            _gh_clear()
+            user_id = getattr(self._app, 'current_user_id', None)
+            _gh_clear(user_id)
             self._cleared = True
             clear_btn.pack_forget()
             cleared_lbl = ctk.CTkLabel(
@@ -882,6 +1069,59 @@ class SettingsPage(ctk.CTkFrame):
                 corner_radius=6, height=22,
             )
             cleared_lbl.pack()
+
+        def _confirm_clear():
+            """Shows a confirmation dialog before clearing gesture history."""
+            dlg = ctk.CTkToplevel(self)
+            dlg.title("Clear Gesture History")
+            dlg.geometry("420x190")
+            dlg.resizable(False, False)
+            dlg.grab_set()
+            dlg.configure(fg_color=_CARD_BG)
+
+            # Center over main window
+            dlg.after(10, lambda: self._center_dialog(dlg, 420, 190))
+
+            ctk.CTkLabel(
+                dlg, text="Clear Gesture History",
+                font=(FONT_PRIMARY, 16, "bold"),
+                text_color=_TEXT_PRI, fg_color="transparent"
+            ).pack(padx=24, pady=(20, 8), anchor="w")
+
+            ctk.CTkLabel(
+                dlg,
+                text="This will permanently delete all saved gesture\n"
+                     "history. This cannot be undone. Continue?",
+                font=(FONT_PRIMARY, 12),
+                text_color=_TEXT_SEC, fg_color="transparent",
+                anchor="w", justify="left"
+            ).pack(padx=24, fill="x")
+
+            btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
+            btn_row.pack(fill="x", padx=24, pady=(20, 20))
+
+            ctk.CTkButton(
+                btn_row, text="Cancel",
+                font=(FONT_PRIMARY, 12),
+                fg_color="transparent", hover_color=_INPUT_BG,
+                text_color=_TEXT_SEC,
+                width=80, height=34, corner_radius=8,
+                command=dlg.destroy
+            ).pack(side="right", padx=(8, 0))
+
+            def _on_confirm():
+                dlg.destroy()
+                _do_clear()
+
+            ctk.CTkButton(
+                btn_row, text="Clear",
+                font=(FONT_PRIMARY, 12, "bold"),
+                fg_color=_ERROR,
+                hover_color=("#C0392B", "#A93226"),
+                text_color=("#FFFFFF", "#FFFFFF"),
+                width=80, height=34, corner_radius=8,
+                command=_on_confirm
+            ).pack(side="right")
 
         clear_right = self._row(card, "Clear gesture history",
                                 "Permanently delete all local logs",
@@ -893,7 +1133,7 @@ class SettingsPage(ctk.CTkFrame):
             hover_color=("#F8D7DA", "#4A2222"),
             text_color=_ERROR,
             width=70, height=30, corner_radius=8,
-            command=_clear_history
+            command=_confirm_clear
         )
         clear_btn.pack()
 

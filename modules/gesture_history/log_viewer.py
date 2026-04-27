@@ -77,6 +77,7 @@ class GestureLogViewerPage(ctk.CTkFrame):
         super().__init__(parent, fg_color=_BG, corner_radius=0)
         self._app      = app
         self._username = username
+        self._user_id  = getattr(app, 'current_user_id', None)
         self._records: list[dict] = []
         self._filter_var = tk.StringVar()
         self._filter_var.trace_add("write", lambda *_: self._apply_filter())
@@ -269,7 +270,7 @@ class GestureLogViewerPage(ctk.CTkFrame):
     # ── Data loading ──────────────────────────────────────────────────────────
 
     def _load_records(self):
-        self._records = get_history()
+        self._records = get_history(self._user_id)
         self._apply_filter()
         self._update_count(len(self._records))
 
@@ -282,9 +283,11 @@ class GestureLogViewerPage(ctk.CTkFrame):
                 or query in (r.get("translated_text") or "").lower()
             ]
         else:
-            filtered = self._records
+            filtered = list(self._records)
 
+        self._filtered = filtered
         self._populate_rows(filtered)
+        self._update_count(len(filtered))
 
     def _populate_rows(self, records: list[dict]):
         for w in self._list_frame.winfo_children():
@@ -395,23 +398,77 @@ class GestureLogViewerPage(ctk.CTkFrame):
     def _handle_clear(self):
         if not self._records:
             return
-        if messagebox.askyesno(
-            "Clear History",
-            "Permanently delete all gesture history records?\nThis cannot be undone."
-        ):
-            success, msg = clear_history()
+
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Clear Gesture History")
+        dlg.geometry("420x190")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.configure(fg_color=_CARD_BG)
+
+        # Center over main window
+        try:
+            top = self.winfo_toplevel()
+            mx, my = top.winfo_x(), top.winfo_y()
+            mw, mh = top.winfo_width(), top.winfo_height()
+            dlg.geometry(f"420x190+{mx + (mw - 420) // 2}+{my + (mh - 190) // 2}")
+        except Exception:
+            pass
+
+        ctk.CTkLabel(
+            dlg, text="Clear Gesture History",
+            font=(FONT_PRIMARY, 16, "bold"),
+            text_color=_TEXT_PRI, fg_color="transparent"
+        ).pack(padx=24, pady=(20, 8), anchor="w")
+
+        ctk.CTkLabel(
+            dlg,
+            text="This will permanently delete all saved gesture\n"
+                 "history. This cannot be undone. Continue?",
+            font=(FONT_PRIMARY, 12),
+            text_color=_TEXT_SEC, fg_color="transparent",
+            anchor="w", justify="left"
+        ).pack(padx=24, fill="x")
+
+        btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_row.pack(fill="x", padx=24, pady=(20, 20))
+
+        ctk.CTkButton(
+            btn_row, text="Cancel",
+            font=(FONT_PRIMARY, 12),
+            fg_color="transparent", hover_color=_INPUT_BG,
+            text_color=_TEXT_SEC,
+            width=80, height=34, corner_radius=8,
+            command=dlg.destroy
+        ).pack(side="right", padx=(8, 0))
+
+        def _on_confirm():
+            dlg.destroy()
+            success, msg = clear_history(self._user_id)
             if success:
                 self._records = []
+                self._filtered = []
                 self._populate_rows([])
                 self._update_count(0)
                 self._show_feedback("✓  All records cleared.", success=True)
 
+        ctk.CTkButton(
+            btn_row, text="Clear",
+            font=(FONT_PRIMARY, 12, "bold"),
+            fg_color=_ERROR,
+            hover_color=("#C0392B", "#A93226"),
+            text_color=("#FFFFFF", "#FFFFFF"),
+            width=80, height=34, corner_radius=8,
+            command=_on_confirm
+        ).pack(side="right")
+
     def _export_csv(self):
-        if not self._records:
+        rows = getattr(self, '_filtered', self._records)
+        if not rows:
             messagebox.showinfo("Export", "No records to export.")
             return
 
-        default_name = f"gesture_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        default_name = f"gesture_log_{datetime.now().strftime('%Y-%m-%d')}.csv"
         path = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
@@ -422,16 +479,25 @@ class GestureLogViewerPage(ctk.CTkFrame):
             return
 
         try:
+            fieldnames = ["#", "Gesture", "Translated", "Confidence", "Date", "Time"]
             with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(
-                    f, fieldnames=["id", "gesture", "translated_text",
-                                   "confidence", "logged_at"]
-                )
-                writer.writeheader()
-                writer.writerows(self._records)
+                writer = csv.writer(f)
+                writer.writerow(fieldnames)
+                for i, rec in enumerate(rows):
+                    date_str, time_str = _fmt_datetime(rec.get("logged_at", ""))
+                    conf = rec.get("confidence")
+                    conf_str = f"{int(conf * 100)}%" if conf is not None else "N/A"
+                    writer.writerow([
+                        i + 1,
+                        rec.get("gesture", ""),
+                        rec.get("translated_text", ""),
+                        conf_str,
+                        date_str,
+                        time_str,
+                    ])
 
             self._show_feedback(
-                f"✓  Exported {len(self._records)} records to CSV.", success=True
+                f"✓  Exported {len(rows)} records to CSV.", success=True
             )
         except Exception as e:
             messagebox.showerror("Export failed", str(e))

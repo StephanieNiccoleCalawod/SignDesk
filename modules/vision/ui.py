@@ -879,6 +879,11 @@ class GestureDetectionPage(ctk.CTkFrame):
         self._conf_value_label.configure(text_color=color)
 
     def _add_to_history(self, gesture: str, confidence: float):
+        """
+        Appends gesture to the in-page sequence display AND
+        persists it to SQLite via log_gesture() if logging is enabled.
+        """
+        # ── In-page gesture sequence display (unchanged) ──
         self._gesture_history.append(gesture)
         if len(self._gesture_history) > self._max_history:
             self._gesture_history = self._gesture_history[-self._max_history:]
@@ -887,6 +892,16 @@ class GestureDetectionPage(ctk.CTkFrame):
         self._history_textbox.insert("1.0", " ".join(self._gesture_history))
         self._history_textbox.configure(state="disabled")
         self._history_textbox.see("end")
+
+        # ── Real-time persistent logging (PATCH) ─────────
+        try:
+            from modules.gesture_history.backend import log_gesture
+            translated = map_gesture_to_text(gesture) or gesture
+            user_id = self._app.current_user_id
+            log_gesture(user_id, gesture, translated, confidence)
+        except Exception as e:
+            # Never let a logging error crash the detection loop
+            print(f"[GestureHistory] log_gesture failed: {e}")
 
     def _clear_history(self):
         self._gesture_history.clear()

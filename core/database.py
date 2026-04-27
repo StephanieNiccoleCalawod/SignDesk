@@ -5,6 +5,7 @@ Connects to a local SQLite database file perfectly aligned with offline requirem
 
 import sqlite3
 import os
+from contextlib import contextmanager
 
 # ──────────────────────────────────────────────────────────────
 # CONNECTION SETTINGS
@@ -14,20 +15,62 @@ import os
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "signdesk.db")
 
+@contextmanager
 def get_connection():
     """
-    Returns a live connection to the local SQLite database.
-    Creates the file automatically if it doesn't exist.
+    Context manager that yields a live SQLite connection.
+    • Enables foreign key enforcement via PRAGMA.
+    • Auto-commits on clean exit, auto-rollbacks on exception.
+    • Always closes the connection in the finally block.
+
+    Usage:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(...)
     """
-    # PARSE_DECLTYPES ensures DATETIME columns map correctly to Python datetime objects
     conn = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
-    # Enable name-based access to columns (similar to pyodbc rows)
     conn.row_factory = sqlite3.Row
-    return conn
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # ──────────────────────────────────────────────────────────────
 # SCHEMA MIGRATION / INITIALIZATION
 # ──────────────────────────────────────────────────────────────
+
+def _create_users_table(cursor):
+    """Creates the users table if it does not exist."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            email_verified INTEGER DEFAULT 0,
+            verification_code TEXT NULL,
+            verification_expiry TIMESTAMP NULL
+        )
+    """)
+
+
+def _create_otp_tokens_table(cursor):
+    """Creates the OTP tokens table for the password reset flow."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS otp_tokens (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            email      TEXT    NOT NULL,
+            otp_code   TEXT    NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            is_used    INTEGER DEFAULT 0
+        )
+    """)
+
 
 def update_database_schema():
     """
@@ -35,35 +78,10 @@ def update_database_schema():
     Safe to run on every startup.
     """
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        # Create the users table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                email_verified INTEGER DEFAULT 0,
-                verification_code TEXT NULL,
-                verification_expiry TIMESTAMP NULL
-            )
-        """)
-
-        # OTP tokens table for password reset flow
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS otp_tokens (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                email      TEXT    NOT NULL,
-                otp_code   TEXT    NOT NULL,
-                expires_at TIMESTAMP NOT NULL,
-                is_used    INTEGER DEFAULT 0
-            )
-        """)
-
-        conn.commit()
-        conn.close()
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            _create_users_table(cursor)
+            _create_otp_tokens_table(cursor)
     except Exception as e:
         print(f"Schema Error: {e}")
 
@@ -73,9 +91,8 @@ def update_database_schema():
 
 if __name__ == "__main__":
     try:
-        conn = get_connection()
-        print(f"Connected to SQLite Database successfully at: {DB_PATH}")
-        conn.close()
+        with get_connection() as conn:
+            print(f"Connected to SQLite Database successfully at: {DB_PATH}")
         update_database_schema()
     except Exception as e:
         print(f"Connection failed: {e}")

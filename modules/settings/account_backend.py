@@ -19,18 +19,16 @@ def init_account_db():
     Safe to run on every startup.
     """
     try:
-        conn = get_connection()
-        cursor = conn.execute("PRAGMA table_info(users)")
-        columns = [col["name"] for col in cursor.fetchall()]
+        with get_connection() as conn:
+            cursor = conn.execute("PRAGMA table_info(users)")
+            columns = [col["name"] for col in cursor.fetchall()]
 
-        if "name" not in columns:
-            conn.execute("ALTER TABLE users ADD COLUMN name TEXT DEFAULT ''")
-            # Seed display name from username for existing users
-            conn.execute(
-                "UPDATE users SET name = username WHERE name = '' OR name IS NULL"
-            )
-            conn.commit()
-        conn.close()
+            if "name" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN name TEXT DEFAULT ''")
+                # Seed display name from username for existing users
+                conn.execute(
+                    "UPDATE users SET name = username WHERE name = '' OR name IS NULL"
+                )
     except Exception as e:
         print(f"[account_backend] migration warning: {e}")
 
@@ -66,12 +64,11 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def get_user(user_id: int) -> dict | None:
     """Fetch user by ID."""
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT id, username, name, email FROM users WHERE id = ?",
-        (user_id,),
-    ).fetchone()
-    conn.close()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, username, name, email FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
 
     if row:
         d = dict(row)
@@ -84,12 +81,11 @@ def get_user(user_id: int) -> dict | None:
 
 def get_user_by_username(username: str) -> dict | None:
     """Fetch user by username (used after existing login flow)."""
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT id, username, name, email FROM users WHERE username = ?",
-        (username,),
-    ).fetchone()
-    conn.close()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, username, name, email FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
 
     if row:
         d = dict(row)
@@ -110,13 +106,11 @@ def update_display_name(user_id: int, new_name: str) -> tuple:
     if not new_name:
         return False, "Display name cannot be empty."
 
-    conn = get_connection()
-    conn.execute(
-        "UPDATE users SET name = ? WHERE id = ?",
-        (new_name, user_id),
-    )
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET name = ? WHERE id = ?",
+            (new_name, user_id),
+        )
     return True, "Display name updated."
 
 
@@ -131,37 +125,31 @@ def update_email(user_id: int, new_email: str, current_password: str) -> tuple:
     if not validate_email(new_email):
         return False, "Please enter a valid email address."
 
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT password_hash, email FROM users WHERE id = ?",
-        (user_id,),
-    ).fetchone()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT password_hash, email FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
 
-    if not row:
-        conn.close()
-        return False, "User not found."
-    if not verify_password(current_password, row["password_hash"]):
-        conn.close()
-        return False, "Incorrect password."
-    if new_email == row["email"]:
-        conn.close()
-        return False, "This is already your current email."
+        if not row:
+            return False, "User not found."
+        if not verify_password(current_password, row["password_hash"]):
+            return False, "Incorrect password."
+        if new_email == row["email"]:
+            return False, "This is already your current email."
 
-    # Check not taken by another account
-    exists = conn.execute(
-        "SELECT id FROM users WHERE email = ? AND id != ?",
-        (new_email, user_id),
-    ).fetchone()
-    if exists:
-        conn.close()
-        return False, "That email is already in use."
+        # Check not taken by another account
+        exists = conn.execute(
+            "SELECT id FROM users WHERE email = ? AND id != ?",
+            (new_email, user_id),
+        ).fetchone()
+        if exists:
+            return False, "That email is already in use."
 
-    conn.execute(
-        "UPDATE users SET email = ? WHERE id = ?",
-        (new_email, user_id),
-    )
-    conn.commit()
-    conn.close()
+        conn.execute(
+            "UPDATE users SET email = ? WHERE id = ?",
+            (new_email, user_id),
+        )
     return True, "Email updated."
 
 
@@ -169,10 +157,12 @@ def update_password(
     user_id: int,
     current_password: str,
     new_password: str,
-    confirm_password: str
+    confirm_password: str,
+    dry_run: bool = False
 ) -> tuple:
     """
     Change the user's password.
+    If dry_run=True, validates all inputs but does NOT write to the database.
     Returns (success, message).
     """
     if new_password != confirm_password:
@@ -182,28 +172,26 @@ def update_password(
     if not valid:
         return False, msg
 
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT password_hash FROM users WHERE id = ?",
-        (user_id,),
-    ).fetchone()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT password_hash FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
 
-    if not row:
-        conn.close()
-        return False, "User not found."
-    if not verify_password(current_password, row["password_hash"]):
-        conn.close()
-        return False, "Current password is incorrect."
-    if verify_password(new_password, row["password_hash"]):
-        conn.close()
-        return False, "New password must differ from your current one."
+        if not row:
+            return False, "User not found."
+        if not verify_password(current_password, row["password_hash"]):
+            return False, "Current password is incorrect."
+        if verify_password(new_password, row["password_hash"]):
+            return False, "New password must differ from your current one."
 
-    conn.execute(
-        "UPDATE users SET password_hash = ? WHERE id = ?",
-        (hash_password(new_password), user_id),
-    )
-    conn.commit()
-    conn.close()
+        if dry_run:
+            return True, "Validation passed."
+
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (hash_password(new_password), user_id),
+        )
     return True, "Password changed."
 
 

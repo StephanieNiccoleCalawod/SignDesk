@@ -1,6 +1,6 @@
 """
 service.py - Authentication Logic
-Handles user login and registration with MSSQL via pyodbc and bcrypt.
+Handles user login and registration with SQLite and bcrypt.
 Includes email verification support for account creation.
 """
 
@@ -96,11 +96,10 @@ def check_duplicate_username(username: str) -> tuple[bool, str]:
     Returns (False, "") if username is available.
     """
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
-        exists = cursor.fetchone() is not None
-        conn.close()
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+            exists = cursor.fetchone() is not None
 
         if exists:
             return True, "This username already exists. Please choose another username."
@@ -116,11 +115,10 @@ def check_duplicate_email(email: str) -> tuple[bool, str]:
     Returns (False, "") if email is available.
     """
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
-        exists = cursor.fetchone() is not None
-        conn.close()
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+            exists = cursor.fetchone() is not None
 
         if exists:
             return True, "An account with this email already exists."
@@ -140,20 +138,19 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
     Returns (True, "Login successful") or (False, "error message").
     """
     try:
-        conn   = get_connection()
-        cursor = conn.cursor()
+        with get_connection() as conn:
+            cursor = conn.cursor()
 
-        cursor.execute(
-            """
-            SELECT password_hash, email_verified
-            FROM   users
-            WHERE  username = ?
-            """,
-            (username,)
-        )
+            cursor.execute(
+                """
+                SELECT password_hash, email_verified
+                FROM   users
+                WHERE  username = ?
+                """,
+                (username,)
+            )
 
-        row = cursor.fetchone()
-        conn.close()
+            row = cursor.fetchone()
 
         if row is None:
             return False, "Incorrect username or password. Please try again."
@@ -185,41 +182,36 @@ def register_user(username: str, email: str, password: str) -> tuple[bool, str, 
     from datetime import datetime
     from core.email_service import get_otp_expiry
     try:
-        conn   = get_connection()
-        cursor = conn.cursor()
+        with get_connection() as conn:
+            cursor = conn.cursor()
 
-        # Final duplicate checks (safety — may have changed since form submission)
-        cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
-        if cursor.fetchone():
-            conn.close()
-            return False, "This username already exists.", ""
+            # Final duplicate checks (safety — may have changed since form submission)
+            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+            if cursor.fetchone():
+                return False, "This username already exists.", ""
 
-        cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
-        if cursor.fetchone():
-            conn.close()
-            return False, "An account with this email already exists.", ""
+            cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+            if cursor.fetchone():
+                return False, "An account with this email already exists.", ""
 
-        # Hash the password securely with bcrypt
-        password_hash = bcrypt.hashpw(
-            password.encode("utf-8"),
-            bcrypt.gensalt()
-        ).decode("utf-8")
+            # Hash the password securely with bcrypt
+            password_hash = bcrypt.hashpw(
+                password.encode("utf-8"),
+                bcrypt.gensalt()
+            ).decode("utf-8")
 
-        # Generate OTP
-        verification_code = ''.join(random.choices(string.digits, k=6))
-        expiry_time = get_otp_expiry()
+            # Generate OTP
+            verification_code = ''.join(random.choices(string.digits, k=6))
+            expiry_time = get_otp_expiry()
 
-        # Insert new user with email_verified = 0
-        cursor.execute(
-            """
-            INSERT INTO users (username, email, password_hash, email_verified, verification_code, verification_expiry)
-            VALUES (?, ?, ?, 0, ?, ?)
-            """,
-            (username, email, password_hash, verification_code, expiry_time)
-        )
-
-        conn.commit()
-        conn.close()
+            # Insert new user with email_verified = 0
+            cursor.execute(
+                """
+                INSERT INTO users (username, email, password_hash, email_verified, verification_code, verification_expiry)
+                VALUES (?, ?, ?, 0, ?, ?)
+                """,
+                (username, email, password_hash, verification_code, expiry_time)
+            )
 
         return True, "Account created tentatively.", verification_code
 
@@ -235,37 +227,32 @@ def create_verified_user(username: str, email: str, password: str) -> tuple[bool
     Returns: (Success, Message)
     """
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_connection() as conn:
+            cursor = conn.cursor()
 
-        # Final duplicate checks (safety — may have changed since form submission)
-        cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
-        if cursor.fetchone():
-            conn.close()
-            return False, "This username already exists. Please go back and choose another."
+            # Final duplicate checks (safety — may have changed since form submission)
+            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+            if cursor.fetchone():
+                return False, "This username already exists. Please go back and choose another."
 
-        cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
-        if cursor.fetchone():
-            conn.close()
-            return False, "An account with this email already exists."
+            cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+            if cursor.fetchone():
+                return False, "An account with this email already exists."
 
-        # Hash the password securely with bcrypt
-        password_hash = bcrypt.hashpw(
-            password.encode("utf-8"),
-            bcrypt.gensalt()
-        ).decode("utf-8")
+            # Hash the password securely with bcrypt
+            password_hash = bcrypt.hashpw(
+                password.encode("utf-8"),
+                bcrypt.gensalt()
+            ).decode("utf-8")
 
-        # Insert as fully verified — no verification_code needed
-        cursor.execute(
-            """
-            INSERT INTO users (username, email, password_hash, email_verified)
-            VALUES (?, ?, ?, 1)
-            """,
-            (username, email, password_hash)
-        )
-
-        conn.commit()
-        conn.close()
+            # Insert as fully verified — no verification_code needed
+            cursor.execute(
+                """
+                INSERT INTO users (username, email, password_hash, email_verified)
+                VALUES (?, ?, ?, 1)
+                """,
+                (username, email, password_hash)
+            )
 
         return True, "Account created successfully."
 
@@ -278,35 +265,29 @@ def verify_user(email: str, entered_code: str) -> tuple[bool, str]:
     """
     from datetime import datetime
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT verification_code, verification_expiry, email_verified FROM users WHERE email = ?", (email,))
-        row = cursor.fetchone()
-        
-        if not row:
-            conn.close()
-            return False, "Account error: User not found."
+        with get_connection() as conn:
+            cursor = conn.cursor()
             
-        stored_code, expiry, verified = row
-        
-        if verified == True:
-            conn.close()
-            return False, "Account is already verified."
+            cursor.execute("SELECT verification_code, verification_expiry, email_verified FROM users WHERE email = ?", (email,))
+            row = cursor.fetchone()
             
-        if stored_code != entered_code:
-            conn.close()
-            return False, "Incorrect verification code."
+            if not row:
+                return False, "Account error: User not found."
+                
+            stored_code, expiry, verified = row
             
-        if expiry and datetime.now() > expiry:
-            conn.close()
-            return False, "Verification code has expired."
+            if verified == True:
+                return False, "Account is already verified."
+                
+            if stored_code != entered_code:
+                return False, "Incorrect verification code."
+                
+            if expiry and datetime.now() > expiry:
+                return False, "Verification code has expired."
+                
+            # Update as verified
+            cursor.execute("UPDATE users SET email_verified = 1, verification_code = NULL, verification_expiry = NULL WHERE email = ?", (email,))
             
-        # Update as verified
-        cursor.execute("UPDATE users SET email_verified = 1, verification_code = NULL, verification_expiry = NULL WHERE email = ?", (email,))
-        conn.commit()
-        conn.close()
-        
         return True, "Email verified successfully."
     except Exception as e:
         return False, f"Database error: {str(e)}"
@@ -320,26 +301,22 @@ def resend_verification_code(email: str) -> tuple[bool, str, str]:
     import string
     from core.email_service import get_otp_expiry
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT email_verified FROM users WHERE email = ?", (email,))
-        row = cursor.fetchone()
-        if not row:
-            conn.close()
-            return False, "Account error: User not found.", ""
+        with get_connection() as conn:
+            cursor = conn.cursor()
             
-        if row[0] == True:
-            conn.close()
-            return False, "Email is already verified.", ""
+            cursor.execute("SELECT email_verified FROM users WHERE email = ?", (email,))
+            row = cursor.fetchone()
+            if not row:
+                return False, "Account error: User not found.", ""
+                
+            if row[0] == True:
+                return False, "Email is already verified.", ""
+                
+            new_code = ''.join(random.choices(string.digits, k=6))
+            expiry = get_otp_expiry()
             
-        new_code = ''.join(random.choices(string.digits, k=6))
-        expiry = get_otp_expiry()
-        
-        cursor.execute("UPDATE users SET verification_code = ?, verification_expiry = ? WHERE email = ?", (new_code, expiry, email))
-        conn.commit()
-        conn.close()
-        
+            cursor.execute("UPDATE users SET verification_code = ?, verification_expiry = ? WHERE email = ?", (new_code, expiry, email))
+            
         return True, "New code generated.", new_code
     except Exception as e:
         return False, f"Database error: {str(e)}", ""

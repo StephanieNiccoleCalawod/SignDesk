@@ -1,470 +1,571 @@
 """
-SignDesk — Gesture History UI
-CustomTkinter implementation matching the gesture_history_wireframe.
+modules/gesture_history/ui.py
+==============================
+GestureHistorySection — the full-page history log viewer widget.
+Used by GestureHistoryPage (page.py) as its body content.
 
-SD009-AC1: Logging disabled by default (toggle in settings panel).
-SD009-AC5: Privacy note — all data stored locally.
+Features:
+  * Stats bar: total records, today's count, logging status badge
+  * Search / filter by gesture letter or translated text
+  * Sortable table: #, Gesture, Translated, Confidence, Date, Time
+  * Auto-refresh every 10 s while the page is visible
+  * Export CSV  |  Clear all  buttons
+  * Empty-state hint when logging is disabled
 """
 
+import csv
 import tkinter as tk
-from datetime import datetime
+from datetime import datetime, date
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+from core.theme import COLORS, FONT_PRIMARY
 from modules.gesture_history.backend import (
-    get_setting,
-    set_setting,
     get_history,
     clear_history,
     get_record_count,
-    init_history_db,
+    get_setting,
 )
 
-# ── Color constants ───────────────────────────────────────────────────────────
-C_PANEL_BG      = "#1c1c2e"
-C_ROW_BG        = "#13131f"
-C_BORDER        = "#2a2a3d"
-C_PURPLE_BG     = "#EEEDFE"
-C_PURPLE_FG     = "#534AB7"
-C_GREEN_BG      = "#d1fae5"
-C_GREEN_FG      = "#1D9E75"
-C_YELLOW_BG     = "#fef3c7"
-C_YELLOW_FG     = "#b45309"
-C_INFO_BG       = "#1e3a5f"
-C_INFO_BORDER   = "#2563eb"
-C_INFO_FG       = "#93c5fd"
-C_DANGER        = "#e24b4a"
-C_TEXT_PRIMARY  = "#ffffff"
-C_TEXT_SECONDARY= "#888888"
-C_DOT_DISABLED  = "#534AB7"
-C_DOT_ENABLED   = "#1D9E75"
-C_DOT_NEUTRAL   = "#93c5fd"
+# ── Colour aliases (matches the rest of the app) ─────────────────────────────
+_CARD_BG     = COLORS["bg_primary"]
+_CARD_BORDER = COLORS["border"]
+_BG          = COLORS["bg_secondary"]
+_TEXT_PRI    = COLORS["text_primary"]
+_TEXT_SEC    = COLORS["text_secondary"]
+_TEXT_MUT    = COLORS["text_muted"]
+_ACCENT      = COLORS["accent"]
+_ACCENT_HOV  = COLORS["accent_hover"]
+_ERROR       = COLORS["error"]
+_ERROR_BG    = COLORS["error_bg"]
+_SUCCESS     = COLORS["success"]
+_SUCCESS_BG  = COLORS["success_bg"]
+_INPUT_BG    = COLORS["input_bg"]
+
+# Extra badge palette
+_PURPLE_BG = "#EEEDFE"
+_PURPLE_FG = "#534AB7"
+_GREEN_BG  = "#d1fae5"
+_GREEN_FG  = "#1D9E75"
+_YELLOW_BG = "#fef3c7"
+_YELLOW_FG = "#b45309"
+_BLUE_BG   = COLORS.get("info_bg", "#EFF6FF")
+_BLUE_FG   = COLORS.get("info",    "#2563EB")
+_ROW_ALT   = COLORS.get("bg_secondary", "#13131f")
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _format_time(iso: str) -> str:
-    """Convert ISO timestamp to '2:14:32 PM' format."""
+def _fmt_datetime(iso: str) -> tuple[str, str]:
+    """Return (date_str, time_str) from an ISO-8601 timestamp string."""
     try:
-        # Changed %-I to %#I for Windows compatibility
-        return datetime.fromisoformat(iso).strftime("%#I:%M:%S %p")
+        dt = datetime.fromisoformat(iso)
+        return dt.strftime("%b %d, %Y"), dt.strftime("%I:%M:%S %p").lstrip("0")
     except Exception:
-        return iso
+        return iso, ""
 
 
-def _make_dot(parent, color: str, size: int = 8) -> tk.Canvas:
-    """Return a small colored circle canvas."""
-    c = tk.Canvas(parent, width=size, height=size,
-                  bg=C_PANEL_BG, highlightthickness=0)
-    c.create_oval(1, 1, size - 1, size - 1, fill=color, outline="")
-    return c
+def _conf_badge(conf) -> tuple[str, str, str]:
+    """Return (bg, fg, label) for a confidence value."""
+    if conf is None:
+        return _INPUT_BG, _TEXT_MUT, "N/A"
+    pct = int(conf * 100)
+    if pct >= 80:
+        return _GREEN_BG, _GREEN_FG, f"{pct}%"
+    if pct >= 60:
+        return _YELLOW_BG, _YELLOW_FG, f"{pct}%"
+    return _ERROR_BG, _ERROR, f"{pct}%"
 
 
-def _separator(parent) -> ctk.CTkFrame:
-    """1px horizontal separator."""
-    return ctk.CTkFrame(parent, height=1, fg_color=C_BORDER, corner_radius=0)
+def _today_count(records: list[dict]) -> int:
+    today = date.today().isoformat()
+    return sum(1 for r in records if r.get("logged_at", "").startswith(today))
 
 
-# ── Panel builder helper ──────────────────────────────────────────────────────
-
-def _make_panel(parent) -> tuple[ctk.CTkFrame, ctk.CTkFrame, ctk.CTkFrame]:
-    """
-    Create a panel with header + body.
-    Returns (panel, header_frame, body_frame).
-    """
-    panel = ctk.CTkFrame(parent, fg_color=C_PANEL_BG, corner_radius=10,
-                         border_width=1, border_color=C_BORDER)
-    header = ctk.CTkFrame(panel, fg_color=C_PANEL_BG, corner_radius=0, height=40)
-    header.pack(fill="x", padx=0, pady=0)
-    header.pack_propagate(False)
-
-    _separator(panel).pack(fill="x")
-
-    body = ctk.CTkFrame(panel, fg_color=C_PANEL_BG, corner_radius=0)
-    body.pack(fill="both", expand=True, padx=14, pady=10)
-
-    return panel, header, body
-
-
-# ── Main Section ──────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN WIDGET
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class GestureHistorySection(ctk.CTkFrame):
     """
-    2×2 grid layout:
-      A (top-left)  — disabled state
-      B (top-right) — enabled + records state
-      C (bottom-left)  — settings toggles
-      D (bottom-right) — static error/empty state reference
+    Self-contained gesture-log viewer.
+    Designed to be embedded into GestureHistoryPage or any CTk container.
     """
 
-    def __init__(self, parent, focus_callback=None, **kwargs):
-        super().__init__(parent, fg_color="transparent", **kwargs)
-        init_history_db()
+    _REFRESH_MS = 10_000   # auto-refresh interval
 
-        self._focus_callback = focus_callback  # optional: called when "Settings" link clicked
-        self._feedback_var   = tk.StringVar()
+    def __init__(self, parent, user_id: int | None = None, **kwargs):
+        super().__init__(parent, fg_color="transparent", corner_radius=0, **kwargs)
+        self._user_id   = user_id
+        self._records:  list[dict] = []
+        self._filtered: list[dict] = []
+        self._sort_col  = "logged_at"
+        self._sort_asc  = False
+        self._filter_var = tk.StringVar()
+        self._filter_var.trace_add("write", lambda *_: self._apply_filter())
+        self._refresh_job = None
 
-        self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, weight=1)
-        self.rowconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        self._build()
+        self._load()
+        self._schedule_refresh()
 
-        self._build_panel_a()
-        self._build_panel_b()
-        self._build_panel_c()
-        self._build_panel_d()
+    # ── Build ────────────────────────────────────────────────────────────────
 
-        self._refresh_panels()
+    def _build(self):
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(3, weight=1)
 
-    # ── Panel A — Disabled state ──────────────────────────────────────────────
+        self._build_stats_bar()
+        self._build_toolbar()
+        self._build_table_header()
+        self._build_table_body()
+        self._build_feedback_bar()
 
-    def _build_panel_a(self):
-        panel, header, body = _make_panel(self)
-        panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
+    # ── Stats bar ────────────────────────────────────────────────────────────
 
-        # Header
-        header.columnconfigure(1, weight=1)
-        self._dot_a = _make_dot(header, C_DOT_DISABLED)
-        self._dot_a.grid(row=0, column=0, padx=(14, 6), pady=10)
+    def _build_stats_bar(self):
+        bar = ctk.CTkFrame(self, fg_color=_CARD_BG, corner_radius=12,
+                           border_width=1, border_color=_CARD_BORDER)
+        bar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        bar.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
-        ctk.CTkLabel(header, text="Gesture history",
-                     font=("Segoe UI", 13, "bold"),
-                     text_color=C_TEXT_PRIMARY).grid(row=0, column=1, sticky="w")
+        self._stat_total  = self._stat_card(bar, 0, "Total Records", "0",
+                                            _PURPLE_FG, _PURPLE_BG)
+        self._stat_today  = self._stat_card(bar, 1, "Today",         "0",
+                                            _GREEN_FG,  _GREEN_BG)
+        self._stat_status = self._stat_card(bar, 2, "Logging",       "—",
+                                            _YELLOW_FG, _YELLOW_BG)
+        self._stat_last   = self._stat_card(bar, 3, "Last Gesture",  "—",
+                                            _BLUE_FG,   _BLUE_BG)
 
-        self._badge_a = ctk.CTkLabel(header, text="Disabled",
-                                     font=("Segoe UI", 11, "bold"),
-                                     text_color=C_TEXT_SECONDARY,
-                                     fg_color=C_BORDER, corner_radius=99,
-                                     padx=8, pady=2)
-        self._badge_a.grid(row=0, column=2, padx=14)
-
-        # Body — centered disabled message
-        body.columnconfigure(0, weight=1)
-        body.rowconfigure(0, weight=1)
-
-        center = ctk.CTkFrame(body, fg_color="transparent")
-        center.grid(row=0, column=0)
-
-        # Circle icon
-        icon_canvas = tk.Canvas(center, width=36, height=36,
-                                bg=C_PANEL_BG, highlightthickness=0)
-        icon_canvas.create_oval(2, 2, 34, 34, fill=C_BORDER, outline="")
-        icon_canvas.create_text(18, 18, text="i", fill=C_TEXT_SECONDARY,
-                                font=("Segoe UI", 14, "bold"))
-        icon_canvas.pack(pady=(0, 10))
-
-        msg_frame = ctk.CTkFrame(center, fg_color="transparent")
-        msg_frame.pack()
-
-        ctk.CTkLabel(msg_frame,
-                     text="Gesture history logging is currently disabled.",
-                     font=("Segoe UI", 11), text_color=C_TEXT_SECONDARY,
-                     wraplength=200).pack()
-
-        link_row = ctk.CTkFrame(msg_frame, fg_color="transparent")
-        link_row.pack()
-        ctk.CTkLabel(link_row, text="Enable it in ",
-                     font=("Segoe UI", 11), text_color=C_TEXT_SECONDARY).pack(side="left")
-
-        settings_link = ctk.CTkLabel(link_row, text="Settings",
-                                     font=("Segoe UI", 11, "bold"),
-                                     text_color=C_INFO_FG, cursor="hand2")
-        settings_link.pack(side="left")
-        settings_link.bind("<Button-1>", lambda e: self._focus_settings_panel())
-
-        ctk.CTkLabel(link_row, text=" to start tracking.",
-                     font=("Segoe UI", 11), text_color=C_TEXT_SECONDARY).pack(side="left")
-
-    # ── Panel B — Enabled + records ───────────────────────────────────────────
-
-    def _build_panel_b(self):
-        panel, header, body = _make_panel(self)
-        panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=(0, 6))
-
-        # Header
-        header.columnconfigure(1, weight=1)
-        self._dot_b = _make_dot(header, C_DOT_ENABLED)
-        self._dot_b.grid(row=0, column=0, padx=(14, 6), pady=10)
-
-        ctk.CTkLabel(header, text="Gesture history",
-                     font=("Segoe UI", 13, "bold"),
-                     text_color=C_TEXT_PRIMARY).grid(row=0, column=1, sticky="w")
-
-        self._badge_b = ctk.CTkLabel(header, text="0 records",
-                                     font=("Segoe UI", 11, "bold"),
-                                     text_color=C_PURPLE_FG,
-                                     fg_color=C_PURPLE_BG, corner_radius=99,
-                                     padx=8, pady=2)
-        self._badge_b.grid(row=0, column=2, padx=14)
-
-        # Body
-        body.columnconfigure(0, weight=1)
-        body.rowconfigure(1, weight=1)
-
-        today_str = datetime.now().strftime("%b %d, %Y").upper()
-        ctk.CTkLabel(body,
-                     text=f"TODAY — {today_str}",
-                     font=("Segoe UI", 9, "bold"),
-                     text_color=C_TEXT_SECONDARY).grid(row=0, column=0, sticky="w", pady=(0, 6))
-
-        # Scrollable list
-        self._scroll_frame = ctk.CTkScrollableFrame(
-            body, fg_color="transparent", height=240,
-            scrollbar_button_color=C_BORDER,
-            scrollbar_button_hover_color=C_PURPLE_FG,
+    @staticmethod
+    def _stat_card(parent, col, label, value, fg, bg):
+        cell = ctk.CTkFrame(parent, fg_color="transparent")
+        cell.grid(row=0, column=col, padx=16, pady=14, sticky="ew")
+        val_lbl = ctk.CTkLabel(
+            cell, text=value,
+            font=(FONT_PRIMARY, 22, "bold"),
+            text_color=fg, fg_color=bg,
+            corner_radius=8, width=64, height=36,
         )
-        self._scroll_frame.grid(row=1, column=0, sticky="nsew")
-        self._scroll_frame.columnconfigure(0, weight=1)
+        val_lbl.pack()
+        ctk.CTkLabel(
+            cell, text=label,
+            font=(FONT_PRIMARY, 11),
+            text_color=_TEXT_MUT, fg_color="transparent",
+        ).pack(pady=(4, 0))
+        return val_lbl
 
-        # Footer
-        footer = ctk.CTkFrame(body, fg_color="transparent")
-        footer.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        footer.columnconfigure(0, weight=1)
+    # ── Toolbar ──────────────────────────────────────────────────────────────
 
-        _separator(body).grid(row=3, column=0, sticky="ew", pady=(0, 8))
+    def _build_toolbar(self):
+        bar = ctk.CTkFrame(self, fg_color=_CARD_BG, corner_radius=10,
+                           border_width=1, border_color=_CARD_BORDER)
+        bar.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        bar.grid_columnconfigure(1, weight=1)
 
-        self._count_label = ctk.CTkLabel(footer, text="0 gestures logged locally",
-                                         font=("Segoe UI", 10),
-                                         text_color=C_TEXT_SECONDARY)
-        self._count_label.grid(row=0, column=0, sticky="w")
+        # Search box
+        search_wrap = ctk.CTkFrame(bar, fg_color=_INPUT_BG, corner_radius=8,
+                                   border_width=1, border_color=_CARD_BORDER)
+        search_wrap.grid(row=0, column=0, padx=14, pady=10, sticky="w")
 
-        ctk.CTkButton(footer, text="Clear history",
-                      font=("Segoe UI", 11), text_color=C_DANGER,
-                      fg_color="transparent", border_color=C_DANGER,
-                      border_width=1, hover_color="#2a1a1a",
-                      width=90, height=26,
-                      command=self._handle_clear,
-                      ).grid(row=0, column=1)
+        ctk.CTkLabel(search_wrap, text="🔍",
+                     font=("Segoe UI Emoji", 12),
+                     fg_color="transparent", text_color=_TEXT_MUT
+                     ).pack(side="left", padx=(10, 4))
 
-        # Feedback label
-        self._feedback_label = ctk.CTkLabel(body, textvariable=self._feedback_var,
-                                            font=("Segoe UI", 10),
-                                            text_color="#a78bfa")
-        self._feedback_label.grid(row=4, column=0, sticky="e")
+        ctk.CTkEntry(
+            search_wrap, textvariable=self._filter_var,
+            placeholder_text="Search gesture or translation…",
+            font=(FONT_PRIMARY, 12),
+            fg_color="transparent", border_width=0,
+            text_color=_TEXT_PRI,
+            placeholder_text_color=_TEXT_MUT,
+            height=32, width=230,
+        ).pack(side="left", padx=(0, 10))
 
-    def _populate_history(self, records: list[dict]):
-        """Clear and re-populate the scrollable history list."""
-        for w in self._scroll_frame.winfo_children():
+        # Right-side action buttons
+        btn_row = ctk.CTkFrame(bar, fg_color="transparent")
+        btn_row.grid(row=0, column=2, padx=14, pady=10, sticky="e")
+
+        ctk.CTkButton(
+            btn_row, text="↻  Refresh",
+            font=(FONT_PRIMARY, 12),
+            fg_color="transparent",
+            hover_color=_INPUT_BG,
+            text_color=_ACCENT,
+            border_width=1, border_color=_ACCENT,
+            width=90, height=34, corner_radius=8,
+            command=self._load,
+        ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_row, text="⬇  Export CSV",
+            font=(FONT_PRIMARY, 12, "bold"),
+            fg_color=_ACCENT, hover_color=_ACCENT_HOV,
+            text_color=("#FFFFFF", "#FFFFFF"),
+            width=120, height=34, corner_radius=8,
+            command=self._export_csv,
+        ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_row, text="🗑  Clear all",
+            font=(FONT_PRIMARY, 12),
+            fg_color="transparent",
+            hover_color=("#4A2222", "#4A2222"),
+            text_color=_ERROR,
+            border_width=1, border_color=_ERROR,
+            width=100, height=34, corner_radius=8,
+            command=self._handle_clear,
+        ).pack(side="left")
+
+    # ── Table header ─────────────────────────────────────────────────────────
+
+    _COLUMNS = [
+        ("",               "#",          40,  "center"),
+        ("gesture",        "Gesture",    70,  "center"),
+        ("translated_text","Translated", 160, "w"),
+        ("confidence",     "Confidence", 110, "center"),
+        ("logged_at",      "Date",       130, "w"),
+        ("logged_at",      "Time",       130, "w"),
+    ]
+
+    def _build_table_header(self):
+        hdr = ctk.CTkFrame(self, fg_color=_CARD_BG, corner_radius=10,
+                           border_width=1, border_color=_CARD_BORDER)
+        hdr.grid(row=2, column=0, sticky="ew", pady=(0, 2))
+
+        row = ctk.CTkFrame(hdr, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=8)
+
+        for col_key, label, width, anchor in self._COLUMNS:
+            lbl = ctk.CTkLabel(
+                row, text=label,
+                font=(FONT_PRIMARY, 11, "bold"),
+                text_color=_TEXT_MUT if col_key != self._sort_col else _ACCENT,
+                fg_color="transparent",
+                width=width, anchor=anchor,
+                cursor="hand2" if col_key else "arrow",
+            )
+            lbl.pack(side="left", padx=4)
+            if col_key:
+                lbl.bind("<Button-1>", lambda e, k=col_key: self._toggle_sort(k))
+
+    # ── Table body ───────────────────────────────────────────────────────────
+
+    def _build_table_body(self):
+        self._list_frame = ctk.CTkScrollableFrame(
+            self, fg_color=_CARD_BG, corner_radius=10,
+            border_width=1, border_color=_CARD_BORDER,
+            scrollbar_button_color=_CARD_BORDER,
+            scrollbar_button_hover_color=_ACCENT,
+        )
+        self._list_frame.grid(row=3, column=0, sticky="nsew", pady=(0, 8))
+        self._list_frame.grid_columnconfigure(0, weight=1)
+
+    # ── Feedback bar ─────────────────────────────────────────────────────────
+
+    def _build_feedback_bar(self):
+        self._feedback_var = tk.StringVar()
+        self._feedback_lbl = ctk.CTkLabel(
+            self, textvariable=self._feedback_var,
+            font=(FONT_PRIMARY, 11),
+            text_color=_SUCCESS, fg_color="transparent", anchor="e",
+        )
+        self._feedback_lbl.grid(row=4, column=0, sticky="e", pady=(0, 4))
+
+    # ── Data loading & filtering ─────────────────────────────────────────────
+
+    def _load(self):
+        self._records = get_history(self._user_id)
+        self._apply_filter()
+        self._update_stats()
+
+    def _apply_filter(self):
+        q = self._filter_var.get().strip().lower()
+        if q:
+            self._filtered = [
+                r for r in self._records
+                if q in (r.get("gesture") or "").lower()
+                or q in (r.get("translated_text") or "").lower()
+            ]
+        else:
+            self._filtered = list(self._records)
+        self._apply_sort()
+
+    def _apply_sort(self):
+        key = self._sort_col
+
+        def _sort_key(r):
+            v = r.get(key)
+            return (v is None, v or "")
+
+        self._filtered.sort(key=_sort_key, reverse=not self._sort_asc)
+        self._populate_rows()
+
+    def _toggle_sort(self, col_key: str):
+        if self._sort_col == col_key:
+            self._sort_asc = not self._sort_asc
+        else:
+            self._sort_col = col_key
+            self._sort_asc = False
+        self._apply_sort()
+
+    # ── Row rendering ────────────────────────────────────────────────────────
+
+    def _populate_rows(self):
+        for w in self._list_frame.winfo_children():
             w.destroy()
 
-        if not records:
-            ctk.CTkLabel(self._scroll_frame,
-                         text="No gestures have been logged yet.",
-                         font=("Segoe UI", 11), text_color=C_TEXT_SECONDARY,
-                         ).pack(pady=20)
+        if not self._filtered:
+            self._build_empty_state()
             return
 
-        for rec in records:
-            row = ctk.CTkFrame(self._scroll_frame, fg_color=C_ROW_BG,
-                               corner_radius=8, border_width=1,
-                               border_color=C_BORDER)
-            row.pack(fill="x", pady=3)
-            row.columnconfigure(1, weight=1)
+        for i, rec in enumerate(self._filtered):
+            self._build_row(i, rec)
 
-            # Gesture badge
-            ctk.CTkLabel(row, text=rec["gesture"][0].upper(),
-                         font=("Segoe UI", 13, "bold"),
-                         text_color=C_PURPLE_FG, fg_color=C_PURPLE_BG,
-                         width=32, height=32, corner_radius=8,
-                         ).grid(row=0, column=0, rowspan=2, padx=(10, 8), pady=8)
+    def _build_empty_state(self):
+        wrap = ctk.CTkFrame(self._list_frame, fg_color="transparent")
+        wrap.pack(expand=True, pady=50)
 
-            # Info
-            gesture_text = rec["gesture"]
-            if rec.get("translated_text"):
-                gesture_text += f" → \"{rec['translated_text']}\""
-            ctk.CTkLabel(row, text=gesture_text,
-                         font=("Segoe UI", 12, "bold"),
-                         text_color=C_TEXT_PRIMARY, anchor="w",
-                         ).grid(row=0, column=1, sticky="w", pady=(8, 0))
+        ctk.CTkLabel(wrap, text="📭",
+                     font=("Segoe UI Emoji", 36),
+                     fg_color="transparent").pack()
 
-            ctk.CTkLabel(row, text=_format_time(rec["logged_at"]),
-                         font=("Segoe UI", 10),
-                         text_color=C_TEXT_SECONDARY, anchor="w",
-                         ).grid(row=1, column=1, sticky="w", pady=(0, 8))
+        if self._records:
+            msg  = "No records match your search."
+            hint = ""
+        else:
+            msg = "No gesture history yet."
+            enabled = get_setting("logging_enabled") == "1"
+            hint = (
+                "Start the Gesture Translator to begin logging."
+                if enabled
+                else "Enable gesture logging in Settings → Privacy & Data."
+            )
 
-            # Confidence pill
-            conf = rec.get("confidence")
-            if conf is None:
-                pill_bg, pill_fg, pill_text = C_BORDER, C_TEXT_SECONDARY, "N/A"
-            elif conf >= 0.80:
-                pill_bg, pill_fg, pill_text = C_GREEN_BG, C_GREEN_FG, f"{int(conf*100)}%"
-            else:
-                pill_bg, pill_fg, pill_text = C_YELLOW_BG, C_YELLOW_FG, f"{int(conf*100)}%"
+        ctk.CTkLabel(wrap, text=msg,
+                     font=(FONT_PRIMARY, 14, "bold"),
+                     text_color=_TEXT_SEC,
+                     fg_color="transparent").pack(pady=(10, 0))
 
-            ctk.CTkLabel(row, text=pill_text,
-                         font=("Segoe UI", 10, "bold"),
-                         text_color=pill_fg, fg_color=pill_bg,
-                         corner_radius=99, padx=8, pady=2,
-                         ).grid(row=0, column=2, rowspan=2, padx=(0, 10))
+        if hint:
+            ctk.CTkLabel(wrap, text=hint,
+                         font=(FONT_PRIMARY, 11),
+                         text_color=_TEXT_MUT,
+                         fg_color="transparent",
+                         wraplength=340).pack(pady=(6, 0))
+
+    def _build_row(self, index: int, rec: dict):
+        iso = rec.get("logged_at", "")
+        date_str, time_str = _fmt_datetime(iso)
+        conf_bg, conf_fg, conf_text = _conf_badge(rec.get("confidence"))
+        translated = rec.get("translated_text") or "—"
+        gesture    = rec.get("gesture", "?")
+
+        row_bg = _CARD_BG if index % 2 == 0 else _ROW_ALT
+
+        row = ctk.CTkFrame(self._list_frame, fg_color=row_bg,
+                           corner_radius=0, height=48)
+        row.pack(fill="x")
+        row.pack_propagate(False)
+
+        inner = ctk.CTkFrame(row, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=14, pady=6)
+
+        # # index
+        ctk.CTkLabel(inner, text=str(index + 1),
+                     font=(FONT_PRIMARY, 11), text_color=_TEXT_MUT,
+                     fg_color="transparent", width=40, anchor="center",
+                     ).pack(side="left", padx=4)
+
+        # Gesture letter badge
+        g_char = gesture[0].upper() if gesture else "?"
+        ctk.CTkLabel(inner, text=g_char,
+                     font=(FONT_PRIMARY, 13, "bold"),
+                     text_color=_PURPLE_FG, fg_color=_PURPLE_BG,
+                     width=32, height=32, corner_radius=8,
+                     ).pack(side="left", padx=(4, 12))
+
+        # Translated text
+        ctk.CTkLabel(inner, text=translated,
+                     font=(FONT_PRIMARY, 12), text_color=_TEXT_PRI,
+                     fg_color="transparent", width=160, anchor="w",
+                     ).pack(side="left", padx=4)
+
+        # Confidence pill
+        ctk.CTkLabel(inner, text=conf_text,
+                     font=(FONT_PRIMARY, 11, "bold"),
+                     text_color=conf_fg, fg_color=conf_bg,
+                     corner_radius=99, padx=8, pady=2,
+                     width=80, anchor="center",
+                     ).pack(side="left", padx=4)
+
+        # Date
+        ctk.CTkLabel(inner, text=date_str,
+                     font=(FONT_PRIMARY, 11), text_color=_TEXT_SEC,
+                     fg_color="transparent", width=130, anchor="w",
+                     ).pack(side="left", padx=4)
+
+        # Time
+        ctk.CTkLabel(inner, text=time_str,
+                     font=(FONT_PRIMARY, 11), text_color=_TEXT_MUT,
+                     fg_color="transparent", width=130, anchor="w",
+                     ).pack(side="left", padx=4)
+
+        # Row divider
+        ctk.CTkFrame(self._list_frame, height=1,
+                     fg_color=_CARD_BORDER, corner_radius=0).pack(fill="x")
+
+    # ── Stats update ─────────────────────────────────────────────────────────
+
+    def _update_stats(self):
+        total   = len(self._records)
+        today   = _today_count(self._records)
+        enabled = get_setting("logging_enabled") == "1"
+
+        self._stat_total.configure(text=str(total))
+        self._stat_today.configure(text=str(today))
+        self._stat_status.configure(
+            text="ON" if enabled else "OFF",
+            text_color=_GREEN_FG if enabled else _ERROR,
+            fg_color=_GREEN_BG if enabled else _ERROR_BG,
+        )
+
+        if self._records:
+            last_gesture = self._records[0].get("gesture", "—")
+            self._stat_last.configure(text=last_gesture.upper())
+        else:
+            self._stat_last.configure(text="—")
+
+    # ── Actions ──────────────────────────────────────────────────────────────
 
     def _handle_clear(self):
-        success, msg = clear_history()
-        if success:
-            self._refresh_panels()
-            self._show_feedback(f"✓  {msg}")
+        if not self._records:
+            self._show_feedback("No records to clear.", success=False)
+            return
 
-    # ── Panel C — Settings ────────────────────────────────────────────────────
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Clear Gesture History")
+        dlg.geometry("420x190")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.configure(fg_color=_CARD_BG)
 
-    def _build_panel_c(self):
-        panel, header, body = _make_panel(self)
-        panel.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(6, 0))
+        # Center over main window
+        try:
+            top = self.winfo_toplevel()
+            mx, my = top.winfo_x(), top.winfo_y()
+            mw, mh = top.winfo_width(), top.winfo_height()
+            dlg.geometry(f"420x190+{mx + (mw - 420) // 2}+{my + (mh - 190) // 2}")
+        except Exception:
+            pass
 
-        # Header
-        header.columnconfigure(1, weight=1)
-        _make_dot(header, C_DOT_NEUTRAL).grid(row=0, column=0, padx=(14, 6), pady=10)
-        ctk.CTkLabel(header, text="Settings — history",
-                     font=("Segoe UI", 13, "bold"),
-                     text_color=C_TEXT_PRIMARY).grid(row=0, column=1, sticky="w")
+        ctk.CTkLabel(
+            dlg, text="Clear Gesture History",
+            font=(FONT_PRIMARY, 16, "bold"),
+            text_color=_TEXT_PRI, fg_color="transparent"
+        ).pack(padx=24, pady=(20, 8), anchor="w")
 
-        # Toggle rows
-        self._settings_body = body
-        self._render_settings_rows()
+        ctk.CTkLabel(
+            dlg,
+            text="This will permanently delete all saved gesture\n"
+                 "history. This cannot be undone. Continue?",
+            font=(FONT_PRIMARY, 12),
+            text_color=_TEXT_SEC, fg_color="transparent",
+            anchor="w", justify="left"
+        ).pack(padx=24, fill="x")
 
-    def _render_settings_rows(self):
-        for w in self._settings_body.winfo_children():
-            w.destroy()
+        btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_row.pack(fill="x", padx=24, pady=(20, 20))
 
-        self._settings_body.columnconfigure(0, weight=1)
+        ctk.CTkButton(
+            btn_row, text="Cancel",
+            font=(FONT_PRIMARY, 12),
+            fg_color="transparent", hover_color=_INPUT_BG,
+            text_color=_TEXT_SEC,
+            width=80, height=34, corner_radius=8,
+            command=dlg.destroy
+        ).pack(side="right", padx=(8, 0))
 
-        toggles = [
-            ("Enable gesture history logging",
-             "Disabled by default (SD009-AC1)",   # SD009-AC1
-             "logging_enabled"),
-            ("Include confidence score",
-             "Save score alongside each gesture",
-             "include_confidence"),
-            ("Include translated text",
-             "Save phonetic output per gesture",
-             "include_translation"),
-        ]
+        def _on_confirm():
+            dlg.destroy()
+            success, msg = clear_history(self._user_id)
+            if success:
+                self._records  = []
+                self._filtered = []
+                self._populate_rows()
+                self._update_stats()
+                self._show_feedback("✓  All records cleared.")
 
-        for i, (title, desc, key) in enumerate(toggles):
-            row = ctk.CTkFrame(self._settings_body, fg_color="transparent")
-            row.grid(row=i * 2, column=0, sticky="ew", pady=4)
-            row.columnconfigure(0, weight=1)
+        ctk.CTkButton(
+            btn_row, text="Clear",
+            font=(FONT_PRIMARY, 12, "bold"),
+            fg_color=_ERROR,
+            hover_color=("#C0392B", "#A93226"),
+            text_color=("#FFFFFF", "#FFFFFF"),
+            width=80, height=34, corner_radius=8,
+            command=_on_confirm
+        ).pack(side="right")
 
-            # Labels
-            label_col = ctk.CTkFrame(row, fg_color="transparent")
-            label_col.grid(row=0, column=0, sticky="w")
-            ctk.CTkLabel(label_col, text=title,
-                         font=("Segoe UI", 12), text_color=C_TEXT_PRIMARY,
-                         anchor="w").pack(anchor="w")
-            ctk.CTkLabel(label_col, text=desc,
-                         font=("Segoe UI", 10), text_color=C_TEXT_SECONDARY,
-                         anchor="w").pack(anchor="w")
+    def _export_csv(self):
+        rows = self._filtered if self._filtered or self._filter_var.get().strip() else self._records
+        if not rows:
+            messagebox.showinfo("Export", "No records to export.")
+            return
 
-            # Toggle
-            current_val = get_setting(key) == "1"
-            switch_var  = tk.BooleanVar(value=current_val)
+        default_name = f"gesture_log_{datetime.now().strftime('%Y-%m-%d')}.csv"
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile=default_name,
+            title="Save gesture log as CSV",
+        )
+        if not path:
+            return
 
-            def _on_toggle(var=switch_var, k=key):
-                set_setting(k, "1" if var.get() else "0")
-                if k == "logging_enabled":
-                    self._refresh_panels()
+        try:
+            fieldnames = ["#", "Gesture", "Translated", "Confidence", "Date", "Time"]
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(fieldnames)
+                for i, rec in enumerate(rows):
+                    date_str, time_str = _fmt_datetime(rec.get("logged_at", ""))
+                    conf = rec.get("confidence")
+                    conf_str = f"{int(conf * 100)}%" if conf is not None else "N/A"
+                    writer.writerow([
+                        i + 1,
+                        rec.get("gesture", ""),
+                        rec.get("translated_text", ""),
+                        conf_str,
+                        date_str,
+                        time_str,
+                    ])
+            self._show_feedback(
+                f"✓  Exported {len(rows)} records to CSV."
+            )
+        except Exception as e:
+            messagebox.showerror("Export failed", str(e))
 
-            ctk.CTkSwitch(row, text="", variable=switch_var,
-                          command=_on_toggle,
-                          progress_color=C_GREEN_FG,
-                          button_color="#ffffff",
-                          button_hover_color="#dddddd",
-                          width=36, height=20,
-                          ).grid(row=0, column=1, padx=(12, 0))
+    # ── Feedback ─────────────────────────────────────────────────────────────
 
-            # Separator (skip after last row)
-            if i < len(toggles) - 1:
-                _separator(self._settings_body).grid(
-                    row=i * 2 + 1, column=0, sticky="ew", pady=2
-                )
-
-        # Privacy note — SD009-AC5
-        note = ctk.CTkFrame(self._settings_body, fg_color=C_INFO_BG,
-                            corner_radius=8, border_width=1,
-                            border_color=C_INFO_BORDER)
-        note.grid(row=len(toggles) * 2, column=0, sticky="ew", pady=(10, 0))
-        note.columnconfigure(1, weight=1)
-
-        _make_dot(note, C_INFO_FG).grid(row=0, column=0, padx=(10, 6), pady=10, sticky="n")
-        ctk.CTkLabel(note,
-                     text="All history data is stored locally on your device. "
-                          "No data is transmitted externally. (SD009-AC5)",  # SD009-AC5
-                     font=("Segoe UI", 10), text_color=C_INFO_FG,
-                     wraplength=220, justify="left",
-                     ).grid(row=0, column=1, sticky="w", padx=(0, 10), pady=10)
-
-    # ── Panel D — Static error/empty states reference ─────────────────────────
-
-    def _build_panel_d(self):
-        panel, header, body = _make_panel(self)
-        panel.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(6, 0))
-
-        header.columnconfigure(1, weight=1)
-        _make_dot(header, C_TEXT_SECONDARY).grid(row=0, column=0, padx=(14, 6), pady=10)
-        ctk.CTkLabel(header, text="Error + empty states",
-                     font=("Segoe UI", 13, "bold"),
-                     text_color=C_TEXT_PRIMARY).grid(row=0, column=1, sticky="w")
-
-        body.columnconfigure(0, weight=1)
-
-        states = [
-            ("#2d1a1a", C_DANGER,        C_INFO_BORDER, "Logging disabled",
-             "Gesture history logging is currently disabled. Enable it in Settings to start tracking."),
-            (C_ROW_BG, C_TEXT_SECONDARY, C_BORDER,      "No records yet",
-             "No gestures have been logged yet. Start detection to begin recording history."),
-            ("#0f2a1e", C_GREEN_FG,      C_GREEN_FG,    "History cleared",
-             "All gesture history records have been cleared successfully."),
-        ]
-
-        for i, (bg, fg, border, title, desc) in enumerate(states):
-            box = ctk.CTkFrame(body, fg_color=bg, corner_radius=8,
-                               border_width=1, border_color=border)
-            box.grid(row=i, column=0, sticky="ew", pady=4)
-            box.columnconfigure(0, weight=1)
-
-            ctk.CTkLabel(box, text=title,
-                         font=("Segoe UI", 11, "bold"), text_color=fg,
-                         anchor="w").grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
-            ctk.CTkLabel(box, text=desc,
-                         font=("Segoe UI", 10), text_color=fg,
-                         wraplength=200, justify="left", anchor="w",
-                         ).grid(row=1, column=0, sticky="w", padx=12, pady=(0, 10))
-
-    # ── Refresh ───────────────────────────────────────────────────────────────
-
-    def _refresh_panels(self):
-        """
-        Re-reads settings + history and updates Panel A and B.
-        Call externally after log_gesture() to update the UI live.
-        """
-        enabled = get_setting("logging_enabled") == "1"
-        records = get_history() if enabled else []
-        count   = len(records)
-
-        # Panel A badge
-        if enabled:
-            self._badge_a.configure(text="Enabled",
-                                    text_color=C_GREEN_FG, fg_color=C_GREEN_BG)
-            self._dot_a.delete("all")
-            self._dot_a.create_oval(1, 1, 7, 7, fill=C_DOT_ENABLED, outline="")
-        else:
-            self._badge_a.configure(text="Disabled",
-                                    text_color=C_TEXT_SECONDARY, fg_color=C_BORDER)
-            self._dot_a.delete("all")
-            self._dot_a.create_oval(1, 1, 7, 7, fill=C_DOT_DISABLED, outline="")
-
-        # Panel B badge + list
-        self._badge_b.configure(text=f"{count} record{'s' if count != 1 else ''}")
-        self._count_label.configure(text=f"{count} gesture{'s' if count != 1 else ''} logged locally")
-        self._populate_history(records)
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
-
-    def _focus_settings_panel(self):
-        """Called when the 'Settings' link in Panel A is clicked."""
-        if self._focus_callback:
-            self._focus_callback()
-
-    def _show_feedback(self, msg: str, error: bool = False):
-        color = "#f87171" if error else "#a78bfa"
-        self._feedback_label.configure(text_color=color)
+    def _show_feedback(self, msg: str, success: bool = True):
+        color = _SUCCESS if success else _ERROR
+        self._feedback_lbl.configure(text_color=color)
         self._feedback_var.set(msg)
-        self.after(3500, lambda: self._feedback_var.set(""))
+        self.after(4000, lambda: self._feedback_var.set(""))
+
+    # ── Auto-refresh ─────────────────────────────────────────────────────────
+
+    def _schedule_refresh(self):
+        self._refresh_job = self.after(self._REFRESH_MS, self._auto_refresh)
+
+    def _auto_refresh(self):
+        self._load()
+        self._schedule_refresh()
+
+    def destroy(self):
+        if self._refresh_job is not None:
+            self.after_cancel(self._refresh_job)
+        super().destroy()

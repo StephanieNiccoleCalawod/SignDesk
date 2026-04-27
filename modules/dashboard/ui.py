@@ -33,8 +33,7 @@ class DashboardPage(ctk.CTkFrame):
         if hasattr(self._app, 'show_settings'):
             self._app.show_settings(self._username)
 
-    def _launch_speech_output(self):
-        self._app.show_speech_output(self._username)
+
 
     def _launch_gesture_history(self):
         self._app.show_gesture_history(self._username)
@@ -118,8 +117,7 @@ class DashboardPage(ctk.CTkFrame):
         create_nav_item(nav_frame, "🖐️", "Gesture Translator",
                         is_active=False,
                         command=self._launch_gesture_detection)
-        create_nav_item(nav_frame, "🔊", "Speech Output",
-                        is_active=False, command=self._launch_speech_output)
+
         create_nav_item(nav_frame, "📖", "Sign Dictionary",
                         is_active=False, command=None)
         create_nav_item(nav_frame, "📈", "Gesture History",
@@ -180,7 +178,7 @@ class DashboardPage(ctk.CTkFrame):
 
         self._build_welcome(body)
         self._build_stats(body)
-        self._build_modules(body)
+        self._build_status(body)
         self._build_how_to_use(body)
         self._build_footer(body)
 
@@ -301,87 +299,65 @@ class DashboardPage(ctk.CTkFrame):
 
     # ── Module Cards ───────────────────────────────────────
 
-    def _build_modules(self, parent):
+    def _build_status(self, parent):
+        """System status panel — replaces the old module-card navigation."""
         ctk.CTkLabel(
-            parent, text="Modules",
+            parent, text="System Status",
             font=(FONT_PRIMARY, 13, "bold"),
             text_color=C_TEXT_DARK, fg_color="transparent", anchor="w"
         ).pack(fill="x", pady=(0, 10))
 
-        modules = [
-            ("🖐️", "Gesture Recognition",
-             "Detect and interpret hand signs in real time using your camera.",
-             True,  self._launch_gesture_detection,
-             C_BADGE_BLUE_BG,  C_BADGE_BLUE_FG),
+        grid = ctk.CTkFrame(parent, fg_color="transparent")
+        grid.pack(fill="x", pady=(0, 20))
+        grid.columnconfigure((0, 1, 2), weight=1)
 
-            ("📖", "Sign Dictionary",
-             "Browse and learn the full supported sign language vocabulary.",
-             False, None,
-             C_BADGE_AMBER_BG, C_BADGE_AMBER_FG),
-
-            ("📈", "Gesture History",
-             "Review every gesture you've signed — confidence scores and translations.",
-             True, self._launch_gesture_history,
-             C_BADGE_GRAY_BG,  C_BADGE_GRAY_FG),
+        status_items = [
+            ("📷", "Camera",       "Ready",         C_BADGE_BLUE_BG,  C_BADGE_BLUE_FG),
+            ("🔒", "Privacy Mode", "Local-only",    "#E8F5E9",        "#2E7D32"),
+            ("📈", "History Log",  self._history_status(), C_BADGE_GRAY_BG,  C_BADGE_GRAY_FG),
         ]
 
-        grid = ctk.CTkFrame(parent, fg_color="transparent")
-        grid.pack(fill="x")
-        grid.columnconfigure(0, weight=1)
-        grid.columnconfigure(1, weight=1)
-
-        for i, (icon, title, desc, is_active, cb, icon_bg, icon_fg) in enumerate(modules):
+        for col, (icon, title, value, bg, fg) in enumerate(status_items):
             card = ctk.CTkFrame(
-                grid, fg_color=C_CARD_BG, corner_radius=14,
-                border_width=1,
-                border_color=C_ACCENT if is_active else C_CARD_BORDER
+                grid, fg_color=C_CARD_BG, corner_radius=12,
+                border_width=1, border_color=C_CARD_BORDER
             )
-            card.grid(
-                row=i // 2, column=i % 2,
-                padx=(0, 10) if i % 2 == 0 else 0,
-                pady=6, sticky="nsew"
-            )
-            pad = ctk.CTkFrame(card, fg_color="transparent")
-            pad.pack(padx=20, pady=18, anchor="w", fill="x")
+            card.grid(row=0, column=col,
+                      padx=(0, 10) if col < 2 else 0,
+                      sticky="nsew")
 
-            # Colored icon badge
-            badge = ctk.CTkFrame(pad, width=40, height=40,
-                                 fg_color=icon_bg, corner_radius=12)
+            inner = ctk.CTkFrame(card, fg_color="transparent")
+            inner.pack(padx=16, pady=14, anchor="w", fill="x")
+
+            # Icon badge
+            badge = ctk.CTkFrame(inner, width=32, height=32,
+                                 fg_color=bg, corner_radius=10)
             badge.pack_propagate(False)
-            badge.pack(anchor="w", pady=(0, 10))
-            ctk.CTkLabel(badge, text=icon, font=("Segoe UI Emoji", 18),
+            badge.pack(anchor="w", pady=(0, 8))
+            ctk.CTkLabel(badge, text=icon, font=("Segoe UI Emoji", 13),
                          fg_color="transparent"
                          ).place(relx=0.5, rely=0.5, anchor="center")
 
-            ctk.CTkLabel(pad, text=title,
-                         font=(FONT_PRIMARY, 13, "bold"),
-                         text_color=C_TEXT_DARK, fg_color="transparent",
-                         anchor="w").pack(fill="x")
-            ctk.CTkLabel(pad, text=desc,
-                         font=(FONT_PRIMARY, 11), text_color=C_TEXT_MID,
-                         fg_color="transparent", anchor="w",
-                         wraplength=260, justify="left"
-                         ).pack(fill="x", pady=(4, 0))
+            ctk.CTkLabel(inner, text=title, font=FONT_SMALL,
+                         text_color=C_TEXT_LIGHT, fg_color="transparent"
+                         ).pack(anchor="w", pady=(0, 2))
 
-            # Status badge — pill style
-            badge_text  = "Launch  →" if is_active else "Coming soon"
-            badge_bg    = icon_bg if is_active else C_BADGE_GRAY_BG
-            badge_fg    = icon_fg if is_active else C_BADGE_GRAY_FG
+            # Value pill
+            pill = ctk.CTkFrame(inner, fg_color=bg, corner_radius=10)
+            pill.pack(anchor="w")
+            ctk.CTkLabel(pill, text=value,
+                         font=(FONT_PRIMARY, 11, "bold"),
+                         text_color=fg, fg_color="transparent"
+                         ).pack(padx=10, pady=3)
 
-            status_frame = ctk.CTkFrame(pad, fg_color=badge_bg,
-                                         corner_radius=12)
-            status_frame.pack(anchor="w", pady=(12, 0))
-            status_lbl = ctk.CTkLabel(
-                status_frame, text=badge_text,
-                font=(FONT_PRIMARY, 11, "bold"),
-                text_color=badge_fg, fg_color="transparent"
-            )
-            status_lbl.pack(padx=12, pady=4)
-
-            if is_active and cb:
-                status_frame.configure(cursor="hand2")
-                status_frame.bind("<Button-1>", lambda e, f=cb: f())
-                status_lbl.bind("<Button-1>",   lambda e, f=cb: f())
+    def _history_status(self) -> str:
+        """Returns a short label for history logging state."""
+        try:
+            from core.config import config
+            enabled = config.get("privacy.gesture_history_log", False)
+            return "Enabled" if enabled else "Disabled"
+        except Exception:
+            return "Unknown"
 
     # ── How-to-Use Cards ───────────────────────────────────
 

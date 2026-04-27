@@ -35,6 +35,7 @@ class SignDeskApp(ctk.CTk):
 
         self._current_page = None
         self._current_user = None
+        self._current_user_id = None
         self.show_login()
 
     def _clear(self):
@@ -43,6 +44,8 @@ class SignDeskApp(ctk.CTk):
             self._current_page = None
 
     def show_login(self):
+        self._current_user = None
+        self._current_user_id = None
         self._clear()
         self.resizable(False, False)
         self._set_size(900, 650)
@@ -93,6 +96,7 @@ class SignDeskApp(ctk.CTk):
 
     def show_settings(self, username: str):
         self._current_user = username
+        self._resolve_user_id(username)
         self._clear()
         self.resizable(True, True)
         self._set_size(950, 680)
@@ -100,26 +104,36 @@ class SignDeskApp(ctk.CTk):
         self._current_page = SettingsPage(self, self, username)
         self._current_page.pack(fill="both", expand=True)
 
-    def show_speech_output(self, username: str):
-        self._current_user = username
-        self._clear()
-        self.resizable(True, True)
-        self._set_size(950, 680)
-        from modules.speech.ui import SpeechOutputPage
-        self._current_page = SpeechOutputPage(self, self, username)
-        self._current_page.pack(fill="both", expand=True)
+
+
 
     def show_dashboard(self, username: str):
         self._current_user = username
+        self._resolve_user_id(username)
         self._clear()
         self.resizable(True, True)
         self._set_size(950, 680)
         self._current_page = DashboardPage(self, self, username)
         self._current_page.pack(fill="both", expand=True)
 
+    @property
+    def current_user_id(self) -> int | None:
+        """Returns the database user_id for the currently logged-in user."""
+        return self._current_user_id
+
+    def _resolve_user_id(self, username: str):
+        """Resolves user_id from the database. Always performs a fresh lookup."""
+        try:
+            from modules.settings.account_backend import get_user_by_username
+            user = get_user_by_username(username)
+            self._current_user_id = user["id"] if user else None
+        except Exception:
+            self._current_user_id = None
+
     def show_gesture_detection(self, username: str):
         """Navigate to the Gesture Detection page (Module 2)."""
         self._current_user = username
+        self._resolve_user_id(username)
         self._clear()
         self.resizable(True, True)
         self._set_size(950, 680)
@@ -128,6 +142,7 @@ class SignDeskApp(ctk.CTk):
 
     def show_gesture_history(self, username: str):
         self._current_user = username
+        self._resolve_user_id(username)
         self._clear()
         self.resizable(True, True)
         self._set_size(950, 680)
@@ -137,6 +152,7 @@ class SignDeskApp(ctk.CTk):
 
     def show_gesture_log_viewer(self, username: str):
         self._current_user = username
+        self._resolve_user_id(username)
         self._clear()
         self.resizable(True, True)
         self._set_size(950, 680)

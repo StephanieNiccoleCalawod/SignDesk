@@ -312,14 +312,13 @@ class ResetPasswordPage(ctk.CTkFrame):
             # Look up the username so the user knows what to type at login
             try:
                 from core.database import get_connection
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT username FROM users WHERE email = ?",
-                    (self._email,)
-                )
-                row = cursor.fetchone()
-                conn.close()
+                with get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT username FROM users WHERE email = ?",
+                        (self._email,)
+                    )
+                    row = cursor.fetchone()
                 username_hint = row[0] if row else None
             except Exception:
                 username_hint = None
