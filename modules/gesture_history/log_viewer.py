@@ -3,17 +3,21 @@ modules/gesture_history/log_viewer.py
 Full-page viewer for saved gesture history logs.
 Accessible from Settings → Privacy & Data → "View saved gesture log".
 Supports CSV download.
+PyQt6 migration.
 """
 
 import csv
 import os
-import tkinter as tk
 from datetime import datetime
-from tkinter import filedialog, messagebox
+from PyQt6.QtWidgets import (
+    QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
+    QLineEdit, QPushButton, QScrollArea, QMessageBox, QFileDialog
+)
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QPixmap, QCursor
 
-import customtkinter as ctk
-
-from core.theme import COLORS, FONT_PRIMARY
+from core.theme import c
+from core.ui_helpers import _set_font
 from modules.gesture_history.backend import (
     get_history,
     clear_history,
@@ -21,29 +25,12 @@ from modules.gesture_history.backend import (
     get_setting,
 )
 
-# ── Color aliases ─────────────────────────────────────────────────────────────
-_CARD_BG     = COLORS["bg_primary"]
-_CARD_BORDER = COLORS["border"]
-_BG          = COLORS["bg_secondary"]
-_TEXT_PRI    = COLORS["text_primary"]
-_TEXT_SEC    = COLORS["text_secondary"]
-_TEXT_MUT    = COLORS["text_muted"]
-_ACCENT      = COLORS["accent"]
-_ACCENT_HOV  = COLORS["accent_hover"]
-_ERROR       = COLORS["error"]
-_ERROR_BG    = COLORS["error_bg"]
-_SUCCESS     = COLORS["success"]
-_SUCCESS_BG  = COLORS["success_bg"]
-_INPUT_BG    = COLORS["input_bg"]
-
 C_PURPLE_BG  = "#EEEDFE"
 C_PURPLE_FG  = "#534AB7"
 C_GREEN_BG   = "#d1fae5"
 C_GREEN_FG   = "#1D9E75"
 C_YELLOW_BG  = "#fef3c7"
 C_YELLOW_FG  = "#b45309"
-C_ROW_BG     = COLORS.get("bg_tertiary", "#13131f")
-
 
 def _fmt_datetime(iso: str) -> tuple[str, str]:
     """Return (date_str, time_str) from ISO timestamp."""
@@ -53,48 +40,49 @@ def _fmt_datetime(iso: str) -> tuple[str, str]:
     except Exception:
         return iso, ""
 
-
-def _conf_colors(conf) -> tuple[str, str, str]:
+def _conf_colors(conf, dark=False) -> tuple[str, str, str]:
     """Return (bg, fg, text) for a confidence value."""
     if conf is None:
-        return _INPUT_BG, _TEXT_MUT, "N/A"
+        return c("input_bg", dark), c("text_muted", dark), "N/A"
     if conf >= 0.80:
         return C_GREEN_BG, C_GREEN_FG, f"{int(conf * 100)}%"
     return C_YELLOW_BG, C_YELLOW_FG, f"{int(conf * 100)}%"
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# LOG VIEWER PAGE
-# ══════════════════════════════════════════════════════════════════════════════
-
-class GestureLogViewerPage(ctk.CTkFrame):
+class GestureLogViewerPage(QWidget):
     """
     Standalone full page — push onto app via app.show_gesture_log_viewer(username).
     Constructor matches all other SignDesk pages: (parent, app, username).
     """
 
     def __init__(self, parent, app, username: str):
-        super().__init__(parent, fg_color=_BG, corner_radius=0)
+        super().__init__(parent)
         self._app      = app
         self._username = username
         self._user_id  = getattr(app, 'current_user_id', None)
         self._records: list[dict] = []
-        self._filter_var = tk.StringVar()
-        self._filter_var.trace_add("write", lambda *_: self._apply_filter())
+        self._filtered: list[dict] = []
+        self.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        
         self._build()
         self._load_records()
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
-        self._build_navbar()
-        self._build_body()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-    def _build_navbar(self):
-        navbar = ctk.CTkFrame(self, height=60,
-                              fg_color=COLORS["panel_left"], corner_radius=0)
-        navbar.pack(fill="x", side="top")
-        navbar.pack_propagate(False)
+        self._build_navbar(layout)
+        self._build_body(layout)
+
+    def _build_navbar(self, parent_layout):
+        navbar = QFrame()
+        navbar.setFixedHeight(60)
+        navbar.setStyleSheet(f"background-color: {c('panel_left', dark=True)}; border: none;")
+        
+        layout = QHBoxLayout(navbar)
+        layout.setContentsMargins(20, 0, 20, 0)
 
         # Logo
         logo_path = os.path.join(
@@ -102,379 +90,408 @@ class GestureLogViewerPage(ctk.CTkFrame):
             "assets", "logo.png"
         )
         if os.path.exists(logo_path):
-            try:
-                from PIL import Image
-                logo_img = ctk.CTkImage(Image.open(logo_path), size=(36, 36))
-                ctk.CTkLabel(navbar, image=logo_img, text="").pack(
-                    side="left", padx=(20, 10))
-                self._logo_img = logo_img
-            except Exception:
-                pass
+            logo_lbl = QLabel()
+            pixmap = QPixmap(logo_path).scaled(
+                36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+            )
+            logo_lbl.setPixmap(pixmap)
+            logo_lbl.setStyleSheet("background: transparent;")
+            layout.addWidget(logo_lbl)
+            layout.addSpacing(10)
 
-        ctk.CTkLabel(
-            navbar, text="SignDesk",
-            font=("Georgia", 18, "bold"),
-            text_color=_TEXT_PRI, fg_color="transparent"
-        ).pack(side="left", padx=24)
+        title = QLabel("SignDesk")
+        title.setStyleSheet("font-family: 'Georgia'; font-size: 18px; font-weight: bold; color: #FFFFFF; background: transparent;")
+        layout.addWidget(title)
 
-        ctk.CTkButton(
-            navbar, text="Logout  →",
-            command=self._on_logout,
-            font=(FONT_PRIMARY, 11),
-            fg_color=_ERROR, hover_color=_ERROR,
-            text_color=("#FFFFFF", "#FFFFFF"),
-            width=90, height=32, corner_radius=6
-        ).pack(side="right", padx=(0, 20), pady=14)
+        layout.addStretch()
 
-        ctk.CTkButton(
-            navbar, text="← Back to Settings",
-            command=self._on_back,
-            font=(FONT_PRIMARY, 11),
-            fg_color="transparent", hover_color=COLORS["panel_left_end"],
-            text_color=("#FFFFFF", "#FFFFFF"),
-            border_width=1, border_color=("#FFFFFF", "#FFFFFF"),
-            width=140, height=32, corner_radius=6
-        ).pack(side="right", padx=(0, 8), pady=14)
+        # Buttons
+        btn_back = QPushButton("← Back to Settings")
+        btn_back.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_back.setFixedSize(140, 32)
+        btn_back.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: #FFFFFF;
+                border: 1px solid #FFFFFF;
+                border-radius: 6px;
+                font-family: 'Segoe UI';
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: {c('panel_left_end', dark=True)};
+            }}
+        """)
+        btn_back.clicked.connect(self._on_back)
+        layout.addWidget(btn_back)
 
-    def _build_body(self):
-        body = ctk.CTkFrame(self, fg_color=_BG, corner_radius=0)
-        body.pack(fill="both", expand=True, padx=28, pady=20)
-        body.grid_columnconfigure(0, weight=1)
-        body.grid_rowconfigure(2, weight=1)
+        layout.addSpacing(8)
+
+        btn_logout = QPushButton("Logout →")
+        btn_logout.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_logout.setFixedSize(90, 32)
+        btn_logout.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('error')};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                font-family: 'Segoe UI';
+                font-size: 11px;
+            }}
+        """)
+        btn_logout.clicked.connect(self._on_logout)
+        layout.addWidget(btn_logout)
+
+        parent_layout.addWidget(navbar)
+
+    def _build_body(self, parent_layout):
+        body = QWidget()
+        body.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(28, 20, 28, 20)
+        layout.setSpacing(10)
 
         # ── Title row ─────────────────────────────────────
-        title_row = ctk.CTkFrame(body, fg_color="transparent")
-        title_row.grid(row=0, column=0, sticky="ew", pady=(0, 4))
-        title_row.columnconfigure(0, weight=1)
+        title_row = QHBoxLayout()
+        title_lbl = QLabel("Saved Gesture Log")
+        title_lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        _set_font(title_lbl, size=20, bold=True)
+        title_row.addWidget(title_lbl)
+        
+        title_row.addSpacing(10)
+        
+        self._count_badge = QLabel("0 records")
+        self._count_badge.setStyleSheet(f"background-color: {C_PURPLE_BG}; color: {C_PURPLE_FG}; border-radius: 10px; padding: 3px 10px; font-weight: bold; font-family: 'Segoe UI'; font-size: 11px;")
+        title_row.addWidget(self._count_badge)
+        
+        title_row.addStretch()
+        layout.addLayout(title_row)
 
-        ctk.CTkLabel(
-            title_row, text="Saved Gesture Log",
-            font=(FONT_PRIMARY, 20, "bold"),
-            text_color=_TEXT_PRI, fg_color="transparent", anchor="w"
-        ).grid(row=0, column=0, sticky="w")
-
-        self._count_badge = ctk.CTkLabel(
-            title_row, text="0 records",
-            font=(FONT_PRIMARY, 11, "bold"),
-            text_color=C_PURPLE_FG, fg_color=C_PURPLE_BG,
-            corner_radius=99, padx=10, pady=3
-        )
-        self._count_badge.grid(row=0, column=1, padx=(10, 0))
-
-        ctk.CTkLabel(
-            body, text="All gesture logs stored locally on this device.",
-            font=(FONT_PRIMARY, 11), text_color=_TEXT_MUT,
-            fg_color="transparent", anchor="w"
-        ).grid(row=1, column=0, sticky="w", pady=(0, 14))
+        desc_lbl = QLabel("All gesture logs stored locally on this device.")
+        desc_lbl.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
+        _set_font(desc_lbl, size=11)
+        layout.addWidget(desc_lbl)
+        layout.addSpacing(4)
 
         # ── Toolbar ───────────────────────────────────────
-        toolbar = ctk.CTkFrame(body, fg_color=_CARD_BG,
-                               corner_radius=10, border_width=1,
-                               border_color=_CARD_BORDER)
-        toolbar.grid(row=2, column=0, sticky="new", pady=(0, 10))
-        toolbar.columnconfigure(1, weight=1)
+        toolbar = QFrame()
+        toolbar.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 10px;
+            }}
+        """)
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(14, 12, 14, 12)
 
-        # Search
-        search_wrap = ctk.CTkFrame(toolbar, fg_color=_INPUT_BG,
-                                   corner_radius=8, border_width=1,
-                                   border_color=_CARD_BORDER)
-        search_wrap.grid(row=0, column=0, padx=14, pady=12, sticky="w")
+        search_wrap = QFrame()
+        search_wrap.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('input_bg')};
+                border: 1px solid {c('border')};
+                border-radius: 8px;
+            }}
+        """)
+        s_layout = QHBoxLayout(search_wrap)
+        s_layout.setContentsMargins(10, 0, 10, 0)
+        
+        s_icon = QLabel("🔍")
+        s_icon.setStyleSheet(f"color: {c('text_muted')}; font-family: 'Segoe UI Emoji'; border: none; background: transparent;")
+        
+        self._filter_var = QLineEdit()
+        self._filter_var.setPlaceholderText("Filter by gesture or text…")
+        self._filter_var.setFixedWidth(220)
+        self._filter_var.setFixedHeight(32)
+        self._filter_var.setStyleSheet(f"""
+            QLineEdit {{
+                border: none;
+                background: transparent;
+                color: {c('text_primary')};
+                font-family: 'Segoe UI';
+                font-size: 12px;
+            }}
+        """)
+        self._filter_var.textChanged.connect(self._apply_filter)
+        
+        s_layout.addWidget(s_icon)
+        s_layout.addWidget(self._filter_var)
+        tb_layout.addWidget(search_wrap)
+        
+        tb_layout.addStretch()
 
-        ctk.CTkLabel(search_wrap, text="🔍",
-                     font=("Segoe UI Emoji", 12),
-                     fg_color="transparent", text_color=_TEXT_MUT
-                     ).pack(side="left", padx=(10, 4))
+        self._download_btn = QPushButton("⬇ Export CSV")
+        self._download_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._download_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('accent')};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 8px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                font-weight: bold;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {c('accent_hover')};
+            }}
+        """)
+        self._download_btn.clicked.connect(self._export_csv)
+        tb_layout.addWidget(self._download_btn)
+        
+        tb_layout.addSpacing(8)
 
-        ctk.CTkEntry(
-            search_wrap, textvariable=self._filter_var,
-            placeholder_text="Filter by gesture or text…",
-            font=(FONT_PRIMARY, 12),
-            fg_color="transparent", border_width=0,
-            text_color=_TEXT_PRI,
-            placeholder_text_color=_TEXT_MUT,
-            height=32, width=220,
-        ).pack(side="left", padx=(0, 10))
+        btn_clear = QPushButton("🗑 Clear all")
+        btn_clear.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_clear.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {c('error')};
+                border: 1px solid {c('error')};
+                border-radius: 8px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: #4A2222;
+                color: #FFFFFF;
+            }}
+        """)
+        btn_clear.clicked.connect(self._handle_clear)
+        tb_layout.addWidget(btn_clear)
 
-        # Right buttons
-        btn_row = ctk.CTkFrame(toolbar, fg_color="transparent")
-        btn_row.grid(row=0, column=2, padx=14, pady=12, sticky="e")
-
-        self._download_btn = ctk.CTkButton(
-            btn_row, text="⬇  Export CSV",
-            font=(FONT_PRIMARY, 12, "bold"),
-            fg_color=_ACCENT, hover_color=_ACCENT_HOV,
-            text_color=("#FFFFFF", "#FFFFFF"),
-            width=120, height=34, corner_radius=8,
-            command=self._export_csv
-        )
-        self._download_btn.pack(side="left", padx=(0, 8))
-
-        ctk.CTkButton(
-            btn_row, text="🗑  Clear all",
-            font=(FONT_PRIMARY, 12),
-            fg_color="transparent",
-            hover_color=("#4A2222", "#4A2222"),
-            text_color=_ERROR,
-            border_width=1, border_color=_ERROR,
-            width=100, height=34, corner_radius=8,
-            command=self._handle_clear
-        ).pack(side="left")
+        layout.addWidget(toolbar)
 
         # ── Table header ──────────────────────────────────
-        header = ctk.CTkFrame(body, fg_color=_CARD_BG,
-                              corner_radius=10, border_width=1,
-                              border_color=_CARD_BORDER)
-        header.grid(row=3, column=0, sticky="ew", pady=(0, 2))
-        self._build_table_header(header)
+        header = QFrame()
+        header.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 10px;
+            }}
+        """)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(14, 8, 14, 8)
+        h_layout.setSpacing(8)
 
-        # ── Scrollable rows ───────────────────────────────
-        self._list_frame = ctk.CTkScrollableFrame(
-            body, fg_color=_CARD_BG, corner_radius=10,
-            border_width=1, border_color=_CARD_BORDER,
-            scrollbar_button_color=_CARD_BORDER,
-            scrollbar_button_hover_color=_ACCENT,
-        )
-        self._list_frame.grid(row=4, column=0, sticky="nsew", pady=(0, 10))
-        body.grid_rowconfigure(4, weight=1)
-        self._list_frame.columnconfigure(0, weight=1)
-
-        # ── Feedback bar ──────────────────────────────────
-        self._feedback_var = tk.StringVar()
-        self._feedback_lbl = ctk.CTkLabel(
-            body, textvariable=self._feedback_var,
-            font=(FONT_PRIMARY, 11),
-            text_color=_SUCCESS, fg_color="transparent", anchor="e"
-        )
-        self._feedback_lbl.grid(row=5, column=0, sticky="e", pady=(4, 0))
-
-    def _build_table_header(self, parent):
         cols = [
-            ("#",          40,  "center"),
-            ("Gesture",    80,  "center"),
-            ("Translated", 160, "w"),
-            ("Confidence", 110, "center"),
-            ("Date",       120, "w"),
-            ("Time",       120, "w"),
+            ("#", 40, Qt.AlignmentFlag.AlignCenter),
+            ("Gesture", 70, Qt.AlignmentFlag.AlignCenter),
+            ("Translated", 160, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("Confidence", 110, Qt.AlignmentFlag.AlignCenter),
+            ("Date", 130, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("Time", 130, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
         ]
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=14, pady=8)
 
         for label, width, anchor in cols:
-            ctk.CTkLabel(
-                row, text=label,
-                font=(FONT_PRIMARY, 11, "bold"),
-                text_color=_TEXT_MUT, fg_color="transparent",
-                width=width, anchor=anchor
-            ).pack(side="left", padx=4)
+            lbl = QLabel(label)
+            lbl.setFixedWidth(width)
+            lbl.setAlignment(anchor)
+            lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+            _set_font(lbl, size=11, bold=True)
+            h_layout.addWidget(lbl)
+        h_layout.addStretch()
 
-    # ── Data loading ──────────────────────────────────────────────────────────
+        layout.addWidget(header)
+
+        # ── Scrollable rows ───────────────────────────────
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 10px;
+            }}
+        """)
+
+        self._list_frame = QWidget()
+        self._list_frame.setStyleSheet("background: transparent;")
+        self._list_layout = QVBoxLayout(self._list_frame)
+        self._list_layout.setContentsMargins(0, 0, 0, 0)
+        self._list_layout.setSpacing(0)
+        self._list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        self._scroll_area.setWidget(self._list_frame)
+        layout.addWidget(self._scroll_area, stretch=1)
+
+        # ── Feedback bar ──────────────────────────────────
+        self._feedback_lbl = QLabel("")
+        self._feedback_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._feedback_lbl.setStyleSheet(f"color: {c('success')}; border: none; background: transparent;")
+        _set_font(self._feedback_lbl, size=11)
+        layout.addWidget(self._feedback_lbl)
+        
+        self._feedback_timer = QTimer(self)
+        self._feedback_timer.setSingleShot(True)
+        self._feedback_timer.timeout.connect(lambda: self._feedback_lbl.setText(""))
+
+        parent_layout.addWidget(body, stretch=1)
+
+    # ── Logic ─────────────────────────────────────────────────────────────────
 
     def _load_records(self):
         self._records = get_history(self._user_id)
         self._apply_filter()
-        self._update_count(len(self._records))
 
     def _apply_filter(self):
-        query = self._filter_var.get().strip().lower()
-        if query:
-            filtered = [
+        q = self._filter_var.text().strip().lower()
+        if q:
+            self._filtered = [
                 r for r in self._records
-                if query in (r.get("gesture") or "").lower()
-                or query in (r.get("translated_text") or "").lower()
+                if q in (r.get("gesture") or "").lower()
+                or q in (r.get("translated_text") or "").lower()
             ]
         else:
-            filtered = list(self._records)
+            self._filtered = list(self._records)
+            
+        self._count_badge.setText(f"{len(self._filtered)} records")
+        self._populate_rows()
 
-        self._filtered = filtered
-        self._populate_rows(filtered)
-        self._update_count(len(filtered))
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+            elif item.layout():
+                self._clear_layout(item.layout())
 
-    def _populate_rows(self, records: list[dict]):
-        for w in self._list_frame.winfo_children():
-            w.destroy()
+    def _populate_rows(self):
+        self._clear_layout(self._list_layout)
 
-        if not records:
-            self._build_empty_state()
+        if not self._filtered:
+            wrap = QWidget()
+            w_layout = QVBoxLayout(wrap)
+            w_layout.setContentsMargins(0, 40, 0, 40)
+            w_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl = QLabel("📭 No records found.")
+            lbl.setStyleSheet(f"color: {c('text_secondary')}; font-family: 'Segoe UI'; font-size: 14px; font-weight: bold; background: transparent; border: none;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            w_layout.addWidget(lbl)
+            self._list_layout.addWidget(wrap)
             return
 
-        for i, rec in enumerate(records):
-            self._build_row(i, rec)
+        for i, rec in enumerate(self._filtered):
+            iso = rec.get("logged_at", "")
+            date_str, time_str = _fmt_datetime(iso)
+            conf_bg, conf_fg, conf_text = _conf_colors(rec.get("confidence"))
+            translated = rec.get("translated_text") or "—"
+            gesture    = rec.get("gesture", "?")
 
-    def _build_empty_state(self):
-        wrap = ctk.CTkFrame(self._list_frame, fg_color="transparent")
-        wrap.pack(expand=True, pady=40)
+            row_bg = c("bg_primary") if i % 2 == 0 else c("bg_secondary")
 
-        ctk.CTkLabel(
-            wrap, text="📭",
-            font=("Segoe UI Emoji", 32), fg_color="transparent"
-        ).pack()
-        ctk.CTkLabel(
-            wrap,
-            text="No gesture records found." if not self._records
-                 else "No records match your filter.",
-            font=(FONT_PRIMARY, 13), text_color=_TEXT_MUT,
-            fg_color="transparent"
-        ).pack(pady=(8, 0))
+            row = QFrame()
+            row.setFixedHeight(48)
+            row.setStyleSheet(f"background-color: {row_bg}; border: none;")
+            
+            r_layout = QHBoxLayout(row)
+            r_layout.setContentsMargins(14, 0, 14, 0)
+            r_layout.setSpacing(8)
 
-        if not self._records:
-            enabled = get_setting("logging_enabled") == "1"
-            hint = (
-                "Start the Gesture Translator to log gestures."
-                if enabled
-                else "Enable gesture history logging in Settings → Privacy & Data."
-            )
-            ctk.CTkLabel(
-                wrap, text=hint,
-                font=(FONT_PRIMARY, 11), text_color=_TEXT_MUT,
-                fg_color="transparent", wraplength=300
-            ).pack(pady=(4, 0))
+            # index
+            lbl_idx = QLabel(str(i + 1))
+            lbl_idx.setFixedWidth(40)
+            lbl_idx.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_idx.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
+            _set_font(lbl_idx, size=11)
+            r_layout.addWidget(lbl_idx)
 
-    def _build_row(self, index: int, rec: dict):
-        date_str, time_str = _fmt_datetime(rec.get("logged_at", ""))
-        conf_bg, conf_fg, conf_text = _conf_colors(rec.get("confidence"))
-        translated = rec.get("translated_text") or "—"
-        gesture    = rec.get("gesture", "?")
+            # Gesture letter badge
+            g_char = gesture[0].upper() if gesture else "?"
+            g_badge = QLabel(g_char)
+            g_badge.setFixedSize(32, 32)
+            g_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            g_badge.setStyleSheet(f"background-color: {C_PURPLE_BG}; color: {C_PURPLE_FG}; border-radius: 8px; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px;")
+            r_layout.addWidget(g_badge)
 
-        row_bg = _CARD_BG if index % 2 == 0 else C_ROW_BG
+            # Translated text
+            lbl_trans = QLabel(translated)
+            lbl_trans.setFixedWidth(160)
+            lbl_trans.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+            _set_font(lbl_trans, size=12)
+            r_layout.addWidget(lbl_trans)
 
-        row = ctk.CTkFrame(self._list_frame, fg_color=row_bg,
-                           corner_radius=0, height=44)
-        row.pack(fill="x")
-        row.pack_propagate(False)
+            # Confidence pill
+            conf_wrap = QWidget()
+            conf_wrap.setFixedWidth(110)
+            cw_layout = QVBoxLayout(conf_wrap)
+            cw_layout.setContentsMargins(0, 0, 0, 0)
+            cw_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            lbl_conf = QLabel(conf_text)
+            lbl_conf.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_conf.setStyleSheet(f"background-color: {conf_bg}; color: {conf_fg}; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-family: 'Segoe UI'; font-size: 11px;")
+            cw_layout.addWidget(lbl_conf)
+            r_layout.addWidget(conf_wrap)
 
-        inner = ctk.CTkFrame(row, fg_color="transparent")
-        inner.pack(fill="both", expand=True, padx=14, pady=4)
+            # Date
+            lbl_date = QLabel(date_str)
+            lbl_date.setFixedWidth(130)
+            lbl_date.setStyleSheet(f"color: {c('text_secondary')}; background: transparent;")
+            _set_font(lbl_date, size=11)
+            r_layout.addWidget(lbl_date)
 
-        # Index
-        ctk.CTkLabel(inner, text=str(index + 1),
-                     font=(FONT_PRIMARY, 11), text_color=_TEXT_MUT,
-                     fg_color="transparent", width=40, anchor="center"
-                     ).pack(side="left", padx=4)
+            # Time
+            lbl_time = QLabel(time_str)
+            lbl_time.setFixedWidth(130)
+            lbl_time.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
+            _set_font(lbl_time, size=11)
+            r_layout.addWidget(lbl_time)
 
-        # Gesture badge
-        badge = ctk.CTkLabel(inner, text=gesture[0].upper(),
-                             font=(FONT_PRIMARY, 12, "bold"),
-                             text_color=C_PURPLE_FG, fg_color=C_PURPLE_BG,
-                             width=28, height=28, corner_radius=6)
-        badge.pack(side="left", padx=(4, 12))
+            r_layout.addStretch()
+            self._list_layout.addWidget(row)
+            
+            # Divider
+            div = QFrame()
+            div.setFixedHeight(1)
+            div.setStyleSheet(f"background-color: {c('border')}; border: none;")
+            self._list_layout.addWidget(div)
 
-        # Translated text
-        ctk.CTkLabel(inner, text=translated,
-                     font=(FONT_PRIMARY, 12), text_color=_TEXT_PRI,
-                     fg_color="transparent", width=160, anchor="w"
-                     ).pack(side="left", padx=4)
-
-        # Confidence pill
-        ctk.CTkLabel(inner, text=conf_text,
-                     font=(FONT_PRIMARY, 11, "bold"),
-                     text_color=conf_fg, fg_color=conf_bg,
-                     corner_radius=99, padx=8, pady=2,
-                     width=80, anchor="center"
-                     ).pack(side="left", padx=4)
-
-        # Date
-        ctk.CTkLabel(inner, text=date_str,
-                     font=(FONT_PRIMARY, 11), text_color=_TEXT_SEC,
-                     fg_color="transparent", width=120, anchor="w"
-                     ).pack(side="left", padx=4)
-
-        # Time
-        ctk.CTkLabel(inner, text=time_str,
-                     font=(FONT_PRIMARY, 11), text_color=_TEXT_MUT,
-                     fg_color="transparent", width=120, anchor="w"
-                     ).pack(side="left", padx=4)
-
-        # Row divider
-        ctk.CTkFrame(self._list_frame, height=1,
-                     fg_color=_CARD_BORDER, corner_radius=0).pack(fill="x")
-
-    # ── Actions ───────────────────────────────────────────────────────────────
-
-    def _update_count(self, n: int):
-        self._count_badge.configure(
-            text=f"{n} record{'s' if n != 1 else ''}"
-        )
+    def _show_feedback(self, msg: str, success: bool = True):
+        color = c("success") if success else c("error")
+        self._feedback_lbl.setStyleSheet(f"color: {color}; border: none; background: transparent;")
+        self._feedback_lbl.setText(msg)
+        self._feedback_timer.start(4000)
 
     def _handle_clear(self):
         if not self._records:
+            self._show_feedback("No records to clear.", success=False)
             return
 
-        dlg = ctk.CTkToplevel(self)
-        dlg.title("Clear Gesture History")
-        dlg.geometry("420x190")
-        dlg.resizable(False, False)
-        dlg.grab_set()
-        dlg.configure(fg_color=_CARD_BG)
-
-        # Center over main window
-        try:
-            top = self.winfo_toplevel()
-            mx, my = top.winfo_x(), top.winfo_y()
-            mw, mh = top.winfo_width(), top.winfo_height()
-            dlg.geometry(f"420x190+{mx + (mw - 420) // 2}+{my + (mh - 190) // 2}")
-        except Exception:
-            pass
-
-        ctk.CTkLabel(
-            dlg, text="Clear Gesture History",
-            font=(FONT_PRIMARY, 16, "bold"),
-            text_color=_TEXT_PRI, fg_color="transparent"
-        ).pack(padx=24, pady=(20, 8), anchor="w")
-
-        ctk.CTkLabel(
-            dlg,
-            text="This will permanently delete all saved gesture\n"
-                 "history. This cannot be undone. Continue?",
-            font=(FONT_PRIMARY, 12),
-            text_color=_TEXT_SEC, fg_color="transparent",
-            anchor="w", justify="left"
-        ).pack(padx=24, fill="x")
-
-        btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
-        btn_row.pack(fill="x", padx=24, pady=(20, 20))
-
-        ctk.CTkButton(
-            btn_row, text="Cancel",
-            font=(FONT_PRIMARY, 12),
-            fg_color="transparent", hover_color=_INPUT_BG,
-            text_color=_TEXT_SEC,
-            width=80, height=34, corner_radius=8,
-            command=dlg.destroy
-        ).pack(side="right", padx=(8, 0))
-
-        def _on_confirm():
-            dlg.destroy()
+        reply = QMessageBox.question(
+            self, "Clear Gesture History", 
+            "This will permanently delete all saved gesture history. This cannot be undone. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
             success, msg = clear_history(self._user_id)
             if success:
-                self._records = []
+                self._records  = []
                 self._filtered = []
-                self._populate_rows([])
-                self._update_count(0)
-                self._show_feedback("✓  All records cleared.", success=True)
-
-        ctk.CTkButton(
-            btn_row, text="Clear",
-            font=(FONT_PRIMARY, 12, "bold"),
-            fg_color=_ERROR,
-            hover_color=("#C0392B", "#A93226"),
-            text_color=("#FFFFFF", "#FFFFFF"),
-            width=80, height=34, corner_radius=8,
-            command=_on_confirm
-        ).pack(side="right")
+                self._count_badge.setText("0 records")
+                self._populate_rows()
+                self._show_feedback("✓ All records cleared.")
 
     def _export_csv(self):
-        rows = getattr(self, '_filtered', self._records)
+        rows = self._filtered if self._filtered or self._filter_var.text().strip() else self._records
         if not rows:
-            messagebox.showinfo("Export", "No records to export.")
+            QMessageBox.information(self, "Export", "No records to export.")
             return
 
         default_name = f"gesture_log_{datetime.now().strftime('%Y-%m-%d')}.csv"
-        path = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialfile=default_name,
-            title="Save gesture log as CSV"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save gesture log as CSV",
+            default_name,
+            "CSV files (*.csv);;All files (*.*)"
         )
+        
         if not path:
             return
 
@@ -495,24 +512,18 @@ class GestureLogViewerPage(ctk.CTkFrame):
                         date_str,
                         time_str,
                     ])
-
-            self._show_feedback(
-                f"✓  Exported {len(rows)} records to CSV.", success=True
-            )
+            self._show_feedback(f"✓ Exported {len(rows)} records to CSV.")
         except Exception as e:
-            messagebox.showerror("Export failed", str(e))
-
-    def _show_feedback(self, msg: str, success: bool = True):
-        color = _SUCCESS if success else _ERROR
-        self._feedback_lbl.configure(text_color=color)
-        self._feedback_var.set(msg)
-        self.after(4000, lambda: self._feedback_var.set(""))
-
-    # ── Navigation ────────────────────────────────────────────────────────────
+            QMessageBox.critical(self, "Export failed", str(e))
 
     def _on_back(self):
-        self._app.show_settings(self._username)
+        if hasattr(self._app, 'show_settings'):
+            self._app.show_settings(self._username)
 
     def _on_logout(self):
-        if messagebox.askyesno("Logout", "Are you sure you want to log out?"):
+        reply = QMessageBox.question(
+            self, "Logout", "Are you sure you want to log out?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
             self._app.show_login()

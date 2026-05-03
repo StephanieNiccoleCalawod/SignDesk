@@ -45,17 +45,7 @@ def is_otp_expired(expiry_time: datetime) -> bool:
 # ──────────────────────────────────────────────────────────────
 
 def send_verification_email(to_email: str, otp_code: str) -> tuple[bool, str]:
-    """
-    Sends a verification email with the OTP code via SMTP.
-
-    SMTP credentials MUST be configured in email_config.py.
-    If sending fails for any reason, returns (False, "error message").
-    The OTP is NEVER displayed on screen — it is only delivered via email.
-
-    Returns:
-        (True, "Email sent successfully") — email was sent.
-        (False, "error message") — sending failed.
-    """
+    print(f"[OTP] Attempting to send verification code to: {to_email}")
 
     try:
         msg = MIMEMultipart("alternative")
@@ -125,21 +115,30 @@ def send_verification_email(to_email: str, otp_code: str) -> tuple[bool, str]:
             server.login(SMTP_EMAIL, SMTP_APP_PASSWORD)
             server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
 
+        print(f"[OTP] Email sent successfully to {to_email}")
         return True, "Verification email sent successfully."
 
-    except smtplib.SMTPAuthenticationError:
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"[OTP] SMTP Auth Error: {e}")
         return False, (
-            "Email authentication failed. Please check SMTP credentials in email_config.py.\n"
-            "Make sure you are using a Gmail App Password (not your regular password)."
+            "Email authentication failed. Check SMTP credentials and App Password."
         )
-    except smtplib.SMTPRecipientsRefused:
-        return False, "The email address was rejected. Please enter a valid email."
+
+    except smtplib.SMTPRecipientsRefused as e:
+        print(f"[OTP] Recipients refused: {e}")
+        return False, "Invalid recipient email address."
+
     except smtplib.SMTPException as e:
-        return False, f"Failed to send email: {str(e)}"
-    except TimeoutError:
-        return False, "Email sending timed out. Please check your internet connection."
+        print(f"[OTP] SMTP error: {e}")
+        return False, f"SMTP error: {str(e)}"
+
+    except TimeoutError as e:
+        print(f"[OTP] Timeout: {e}")
+        return False, "Email sending timed out."
+
     except Exception as e:
-        return False, f"Failed to send verification email: {str(e)}"
+        print(f"[OTP] Unexpected error: {e}")
+        return False, f"Unexpected error: {str(e)}"
 
 
 # ──────────────────────────────────────────────────────────────

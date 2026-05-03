@@ -1,37 +1,34 @@
 """
 SignDesk - Sign Language to Speech System
 Main Application Entry Point
+PyQt6 migration
 """
 
-import customtkinter as ctk
-from core.theme import apply_theme, theme
+import sys
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout
+from PyQt6.QtCore import Qt
+
+from core.theme import build_qss, c
 from modules.auth.ui import LoginPage, RegisterPage, VerificationPage
 from modules.dashboard.ui import DashboardPage
 from modules.vision.ui import GestureDetectionPage
 
-class SignDeskApp(ctk.CTk):
+class SignDeskApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title("SignDesk")
-        self.geometry("950x680")
-        self.minsize(950, 680)
-        self.resizable(False, False)
+        self.setWindowTitle("SignDesk")
         
-        # Apply theme globally
-        apply_theme()
+        # Central widget to hold pages
+        self._central_widget = QWidget()
+        self._layout = QVBoxLayout(self._central_widget)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self.setCentralWidget(self._central_widget)
         
         from core.config import config
         config.load()
 
         from modules.settings.account_backend import init_account_db
         init_account_db()
-        
-        self.configure(fg_color=theme.get_color("bg_main"))
-
-        self.update_idletasks()
-        x = (self.winfo_screenwidth()  - 900) // 2
-        y = (self.winfo_screenheight() - 650) // 2
-        self.geometry(f"900x650+{x}+{y}")
 
         self._current_page = None
         self._current_user = None
@@ -40,81 +37,87 @@ class SignDeskApp(ctk.CTk):
 
     def _clear(self):
         if self._current_page:
-            self._current_page.destroy()
+            self._layout.removeWidget(self._current_page)
+            self._current_page.deleteLater()
             self._current_page = None
+
+    def _set_size(self, width: int, height: int, resizable: bool = True):
+        """Resize and re-center the window."""
+        if resizable:
+            self.setMinimumSize(width, height)
+            self.setMaximumSize(16777215, 16777215)
+            self.resize(width, height)
+        else:
+            self.setMinimumSize(width, height)
+            self.setMaximumSize(16777215, 16777215)
+            self.resize(width, height)
+
+        screen = QApplication.primaryScreen().availableGeometry()
+        x = (screen.width() - width) // 2
+        y = (screen.height() - height) // 2
+        self.setGeometry(x, y, width, height)
 
     def show_login(self):
         self._current_user = None
         self._current_user_id = None
         self._clear()
-        self.resizable(False, False)
-        self._set_size(900, 650)
-        self._current_page = LoginPage(self, self)
-        self._current_page.pack(fill="both", expand=True)
+        self._set_size(900, 650, resizable=False)
+        self._current_page = LoginPage(self._central_widget, self)
+        self._layout.addWidget(self._current_page)
 
     def show_register(self):
         self._clear()
-        self.resizable(False, False)
-        self._set_size(900, 650)
-        self._current_page = RegisterPage(self, self)
-        self._current_page.pack(fill="both", expand=True)
+        self._set_size(900, 650, resizable=False)
+        self._current_page = RegisterPage(self._central_widget, self)
+        self._layout.addWidget(self._current_page)
 
     def show_verification(self, pending_data: dict):
         """Navigate to the email verification page."""
         self._clear()
-        self.resizable(False, False)
-        self._set_size(900, 650)
-        self._current_page = VerificationPage(self, self, pending_data)
-        self._current_page.pack(fill="both", expand=True)
+        self._set_size(900, 650, resizable=False)
+        self._current_page = VerificationPage(self._central_widget, self, pending_data)
+        self._layout.addWidget(self._current_page)
 
     def show_forgot_password(self):
         """Navigate to the Forgot Password page (Step 1)."""
         self._clear()
-        self.resizable(False, False)
-        self._set_size(900, 650)
+        self._set_size(900, 650, resizable=False)
         from modules.auth.forgot_password_window import ForgotPasswordPage
-        self._current_page = ForgotPasswordPage(self, self)
-        self._current_page.pack(fill="both", expand=True)
+        self._current_page = ForgotPasswordPage(self._central_widget, self)
+        self._layout.addWidget(self._current_page)
 
     def show_otp_verification(self, email: str):
         """Navigate to the OTP Verification page (Step 2)."""
         self._clear()
-        self.resizable(False, False)
-        self._set_size(900, 650)
+        self._set_size(900, 650, resizable=False)
         from modules.auth.otp_verification_window import ForgotPasswordOTPPage
-        self._current_page = ForgotPasswordOTPPage(self, self, email)
-        self._current_page.pack(fill="both", expand=True)
+        self._current_page = ForgotPasswordOTPPage(self._central_widget, self, email)
+        self._layout.addWidget(self._current_page)
 
     def show_reset_password(self, email: str):
         """Navigate to the Reset Password page (Step 3)."""
         self._clear()
-        self.resizable(False, False)
-        self._set_size(900, 650)
+        self._set_size(900, 650, resizable=False)
         from modules.auth.reset_password_window import ResetPasswordPage
-        self._current_page = ResetPasswordPage(self, self, email)
-        self._current_page.pack(fill="both", expand=True)
+        self._current_page = ResetPasswordPage(self._central_widget, self, email)
+        self._layout.addWidget(self._current_page)
 
     def show_settings(self, username: str):
         self._current_user = username
         self._resolve_user_id(username)
         self._clear()
-        self.resizable(True, True)
-        self._set_size(950, 680)
+        self._set_size(950, 680, resizable=True)
         from modules.settings.ui import SettingsPage
-        self._current_page = SettingsPage(self, self, username)
-        self._current_page.pack(fill="both", expand=True)
-
-
-
+        self._current_page = SettingsPage(self._central_widget, self, username)
+        self._layout.addWidget(self._current_page)
 
     def show_dashboard(self, username: str):
         self._current_user = username
         self._resolve_user_id(username)
         self._clear()
-        self.resizable(True, True)
-        self._set_size(950, 680)
-        self._current_page = DashboardPage(self, self, username)
-        self._current_page.pack(fill="both", expand=True)
+        self._set_size(950, 680, resizable=True)
+        self._current_page = DashboardPage(self._central_widget, self, username)
+        self._layout.addWidget(self._current_page)
 
     @property
     def current_user_id(self) -> int | None:
@@ -135,40 +138,37 @@ class SignDeskApp(ctk.CTk):
         self._current_user = username
         self._resolve_user_id(username)
         self._clear()
-        self.resizable(True, True)
-        self._set_size(950, 680)
-        self._current_page = GestureDetectionPage(self, self, username)
-        self._current_page.pack(fill="both", expand=True)
+        self._set_size(950, 680, resizable=True)
+        self._current_page = GestureDetectionPage(self._central_widget, self, username)
+        self._layout.addWidget(self._current_page)
 
     def show_gesture_history(self, username: str):
         self._current_user = username
         self._resolve_user_id(username)
         self._clear()
-        self.resizable(True, True)
-        self._set_size(950, 680)
+        self._set_size(950, 680, resizable=True)
         from modules.gesture_history.page import GestureHistoryPage
-        self._current_page = GestureHistoryPage(self, self, username)
-        self._current_page.pack(fill="both", expand=True)
+        self._current_page = GestureHistoryPage(self._central_widget, self, username)
+        self._layout.addWidget(self._current_page)
 
     def show_gesture_log_viewer(self, username: str):
         self._current_user = username
         self._resolve_user_id(username)
         self._clear()
-        self.resizable(True, True)
-        self._set_size(950, 680)
+        self._set_size(950, 680, resizable=True)
         from modules.gesture_history.log_viewer import GestureLogViewerPage
-        self._current_page = GestureLogViewerPage(self, self, username)
-        self._current_page.pack(fill="both", expand=True)
-
-    def _set_size(self, width: int, height: int):
-        """Resize and re-center the window."""
-        x = (self.winfo_screenwidth() - width) // 2
-        y = (self.winfo_screenheight() - height) // 2
-        self.geometry(f"{width}x{height}+{x}+{y}")
+        self._current_page = GestureLogViewerPage(self._central_widget, self, username)
+        self._layout.addWidget(self._current_page)
 
 if __name__ == "__main__":
     from core.database import update_database_schema
     update_database_schema()
     
-    app = SignDeskApp()
-    app.mainloop()
+    app = QApplication(sys.argv)
+    
+    # Apply global theme QSS
+    app.setStyleSheet(build_qss())
+    
+    window = SignDeskApp()
+    window.show()
+    sys.exit(app.exec())

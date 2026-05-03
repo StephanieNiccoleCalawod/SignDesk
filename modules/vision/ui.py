@@ -1,939 +1,986 @@
 """
-ui_combined.py - Combined Gesture Detection + Speech Output Page
+modules/vision/ui.py
+Full-page Vision + Gesture Translation interface.
+PyQt6 refactored version with standardized practices, safety guards, and clean UI components.
 
-Merges GestureDetectionPage (modules/vision/ui.py) and
-SpeechOutputPage (modules/speech/ui.py) into a single page.
-
-Layout:
-  ┌─────────────────────────────────────────────────────────┐
-  │  Navbar                                                 │
-  ├──────────────────┬──────────────────┬───────────────────┤
-  │  Camera Feed     │  Gesture Status  │  Speech Output    │
-  │  (Live Det.)     │  Comm. Output    │  (Finalized       │
-  │  Start/Stop      │  Final Sentence  │   Sentences +     │
-  │                  │  Gesture Seq.    │   Play buttons)   │
-  └──────────────────┴──────────────────┴───────────────────┘
+Fixes applied:
+  1. GestureRecognizer properly receives the configured hold_seconds to fix the delay bug.
+  2. Lambdas overriding QWidget events replaced with standard QPushButton and QSS.
+  3. Proper module structure, standard error handling, and robust update loop.
 """
 
-import customtkinter as ctk
-from tkinter import messagebox
-from PIL import Image, ImageTk, ImageOps
-import cv2
+from __future__ import annotations
+
 import os
 import time
-import threading
 
-from core.theme import *
+import cv2
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import (
+    QColor, QCursor, QImage, QLinearGradient, QPainter, QPixmap,
+)
+from PyQt6.QtWidgets import (
+    QComboBox, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressBar,
+    QPushButton, QScrollArea, QTextEdit, QVBoxLayout, QWidget,
+)
+
 from core.config import config
-from modules.vision.camera import CameraManager
-from modules.vision.tracker import HandTracker
+from core.theme import c
+from core.ui_helpers import _set_font, create_nav_item
+
+# Logic & Backend
 from modules.gestures.engine import GestureRecognizer
-from modules.text.mapper import map_gesture_to_text
-from modules.text.buffer import TextBuffer
 from modules.sentence.builder import SentenceBuilder
 from modules.speech.buffer import speech_buffer
-from modules.speech.word_assembler import word_assembler
 from modules.speech.tts import TTSEngine
+from modules.speech.word_assembler import word_assembler
+from modules.text.buffer import TextBuffer
+from modules.text.mapper import map_gesture_to_text
+from modules.vision.camera import CameraManager
+from modules.vision.tracker import HandTracker
 
 
-_VOICE_LABELS = {
-    "default": ("🔊", "Default"),
-    "female":  ("♀",  "Female"),
-    "male":    ("♂",  "Male"),
-}
+# ══════════════════════════════════════════════════════════════════════════════
+# GRADIENT SIDEBAR
+# ══════════════════════════════════════════════════════════════════════════════
+
+class GradientSidebar(QFrame):
+    """Sidebar with vertical gradient background."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(210)
+
+    def paintEvent(self, event):  # noqa: N802
+        painter = QPainter(self)
+        grad = QLinearGradient(0, 0, 0, self.height())
+        grad.setColorAt(0, QColor(c("panel_left", dark=True)))
+        grad.setColorAt(1, QColor(c("panel_left_end", dark=True)))
+        painter.fillRect(self.rect(), grad)
 
 
-class GestureDetectionPage(ctk.CTkFrame):
-    UPDATE_INTERVAL = 33
+# ══════════════════════════════════════════════════════════════════════════════
+# GESTURE DETECTION PAGE
+# ══════════════════════════════════════════════════════════════════════════════
 
-    def __init__(self, parent, app, username: str):
-        super().__init__(parent, fg_color=COLORS["bg_secondary"], corner_radius=0)
-        self._app             = app
-        self._username        = username
-        self._camera          = CameraManager()
-        self._tracker         = HandTracker()
-        self._recognizer      = GestureRecognizer()
-        self._text_buffer     = TextBuffer()
+class GestureDetectionPage(QWidget):
+    UPDATE_INTERVAL = 33   # ~30 fps
+
+    def __init__(self, parent: QWidget, app, username: str) -> None:
+        super().__init__(parent)
+        self._app = app
+        self._username = username
+        self.setStyleSheet(f"background-color: {c('bg_secondary')};")
+
+        # ── Config ───────────────────────────────────────
+        self._conf_threshold = config.get("gesture.confidence_threshold", 60.0) / 100.0
+        self._hold_duration  = config.get("gesture.timeout", 2.0)
+
+        # ── Backend objects ──────────────────────────────
+        self._camera           = CameraManager()
+        self._tracker          = HandTracker()
+        self._recognizer       = GestureRecognizer(hold_seconds=self._hold_duration)
+        self._text_buffer      = TextBuffer()
         self._sentence_builder = SentenceBuilder(timeout=4.0)
 
-        self._is_detecting        = False
-        self._update_job          = None
-        self._gesture_history     = []
-        self._max_history         = 50
-        self._live_speech_enabled = False
-        self._tts_speaking        = False
-        self._last_spoken_char    = None
+        # ── TTS Integration ──────────────────────────────
+        self._tts = TTSEngine(on_error=self._handle_tts_error)
+        word_assembler.set_tts(self._tts)
 
-        # TTS engine (from SpeechOutputPage)
-        self.tts = TTSEngine(on_error=self._handle_tts_error)
+        # ── State ────────────────────────────────────────
+        self._is_detecting         = False
+        self._update_timer         = QTimer(self)
+        self._update_timer.setInterval(self.UPDATE_INTERVAL)
+        self._update_timer.timeout.connect(self._update_loop)
 
-        # Inject TTS into assembler ONCE at page creation
-        word_assembler.set_tts(self.tts)
+        self._gesture_history      = []
+        self._max_history          = 50
+        self._live_speech_enabled  = False
+        self._permission_granted   = False
 
         self._build()
 
-    # ── Build ──────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════
+    # UI CONSTRUCTION
+    # ══════════════════════════════════════════════════════
 
-    def _build(self):
-        self._build_navbar()
-        self._build_body()
+    def _build(self) -> None:
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._build_sidebar(layout)
+        self._build_main_area(layout)
 
-    def _build_navbar(self):
-        navbar = ctk.CTkFrame(self, height=60, fg_color=COLORS["panel_left"], corner_radius=0)
-        navbar.pack(fill="x", side="top")
-        navbar.pack_propagate(False)
+    def _build_sidebar(self, parent_layout: QHBoxLayout) -> None:
+        sidebar = GradientSidebar(self)
+        parent_layout.addWidget(sidebar)
+
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(16, 24, 16, 20)
+        layout.setSpacing(0)
+
+        # Logo + brand
+        brand = QHBoxLayout()
+        brand.setSpacing(10)
+        brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         logo_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "assets", "logo.png"
+            "assets", "logo.png",
         )
         if os.path.exists(logo_path):
-            try:
-                logo_img = ctk.CTkImage(Image.open(logo_path), size=(36, 36))
-                ctk.CTkLabel(navbar, image=logo_img, text="").pack(side="left", padx=(20, 10))
-            except Exception:
-                pass
+            lbl = QLabel()
+            px = QPixmap(logo_path).scaled(
+                36, 36,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            lbl.setPixmap(px)
+            brand.addWidget(lbl)
 
-        ctk.CTkLabel(
-            navbar, text="SignDesk",
-            font=("Georgia", 18, "bold"),
-            text_color=COLORS["text_primary"], fg_color="transparent"
-        ).pack(side="left", padx=24)
+        title = QLabel("SignDesk")
+        title.setStyleSheet("color: #FFFFFF; background: transparent;")
+        _set_font(title, 16, bold=True)
+        brand.addWidget(title)
+        layout.addLayout(brand)
 
-        ctk.CTkButton(
-            navbar, text="Logout  →",
-            command=self._on_logout, font=FONT_NAV,
-            fg_color=COLORS["error"], hover_color=COLORS["error"],
-            text_color=("#FFFFFF", "#FFFFFF"), width=90, height=32, corner_radius=6
-        ).pack(side="right", padx=(0, 20), pady=14)
+        # Divider
+        layout.addSpacing(16)
+        div1 = QFrame()
+        div1.setFixedHeight(1)
+        div1.setStyleSheet("background-color: #4A4590; border: none;")
+        layout.addWidget(div1)
+        layout.addSpacing(16)
 
-        ctk.CTkButton(
-            navbar, text="← Dashboard",
-            command=self._on_back, font=FONT_NAV,
-            fg_color="transparent", hover_color=COLORS["panel_left_end"],
-            text_color=("#FFFFFF", "#FFFFFF"), border_width=1, border_color=("#FFFFFF", "#FFFFFF"),
-            width=120, height=32, corner_radius=6
-        ).pack(side="right", padx=(0, 8), pady=14)
+        # Back nav item
+        nav = QVBoxLayout()
+        nav.setSpacing(2)
+        nav.addWidget(create_nav_item(
+            sidebar, "←", "Back to Dashboard",
+            command=self._on_back, dark=True,
+        ))
+        layout.addLayout(nav)
+        layout.addSpacing(24)
 
-    def _build_body(self):
-        body = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
-        body.pack(fill="both", expand=True, padx=20, pady=20)
+        # System settings labels
+        sys_lbl = QLabel("SYSTEM SETTINGS")
+        sys_lbl.setStyleSheet("color: #84849E; background: transparent;")
+        _set_font(sys_lbl, 11, bold=True)
+        layout.addWidget(sys_lbl)
+        layout.addSpacing(10)
 
-        # ── 2-column 50/50 root grid ──────────────────────────
-        # LEFT half: gesture system (camera + status panels)
-        # RIGHT half: speech output
-        body.grid_columnconfigure(0, weight=1, minsize=500)
-        body.grid_columnconfigure(1, weight=1, minsize=320)
-        body.grid_rowconfigure(0, weight=1)
+        settings = [
+            ("Camera",     "Built-in HD",                            "📷"),
+            ("Model",      "ASL Standard",                           "🧠"),
+            ("Confidence", f"Min {int(self._conf_threshold * 100)}%","🎯"),
+            ("Hold Time",  f"{self._hold_duration}s",                "⏱️"),
+        ]
+        for title_txt, val, icon in settings:
+            row = QWidget()
+            r = QHBoxLayout(row)
+            r.setContentsMargins(0, 0, 0, 0)
+            i_lbl = QLabel(icon)
+            i_lbl.setStyleSheet(
+                "color: #B8B5D0; font-family: 'Segoe UI Emoji'; background: transparent;")
+            t_lbl = QLabel(title_txt)
+            t_lbl.setStyleSheet("color: #B8B5D0; background: transparent;")
+            _set_font(t_lbl, 11)
+            v_lbl = QLabel(val)
+            v_lbl.setStyleSheet("color: #FFFFFF; background: transparent;")
+            _set_font(v_lbl, 11, bold=True)
+            r.addWidget(i_lbl)
+            r.addWidget(t_lbl)
+            r.addStretch()
+            r.addWidget(v_lbl)
+            layout.addWidget(row)
+            layout.addSpacing(8)
 
-        # ── LEFT HALF: contains camera + gesture panels ────────
-        left_half = ctk.CTkFrame(body, fg_color="transparent")
-        left_half.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        left_half.grid_rowconfigure(0, weight=1)
-        left_half.grid_columnconfigure(0, weight=5)   # camera
-        left_half.grid_columnconfigure(1, weight=4)   # gesture panels
+        layout.addStretch()
 
-        # Camera sub-column
-        left_col = ctk.CTkFrame(left_half, fg_color="transparent")
-        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        left_col.grid_rowconfigure(0, weight=1)
-        left_col.grid_columnconfigure(0, weight=1)
+        # Logout Button
+        div2 = QFrame()
+        div2.setFixedHeight(1)
+        div2.setStyleSheet("background-color: #4A4590; border: none;")
+        layout.addWidget(div2)
+        layout.addSpacing(8)
 
-        # Gesture status/output/sequence sub-column
-        mid_outer = ctk.CTkFrame(left_half, fg_color=COLORS["bg_secondary"], corner_radius=12,
-                                 border_width=1, border_color=COLORS["border"])
-        mid_outer.grid(row=0, column=1, sticky="nsew")
-        mid_outer.grid_rowconfigure(0, weight=1)
-        mid_outer.grid_columnconfigure(0, weight=1)
+        self._logout_btn = QPushButton("🚪  Logout")
+        self._logout_btn.setFixedHeight(38)
+        self._logout_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._logout_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: #FF8A80; text-align: left;
+                padding-left: 12px; border-radius: 10px; font-family: 'Segoe UI'; font-size: 13px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: #3D4470; }}
+        """)
+        self._logout_btn.clicked.connect(self._on_logout)
+        layout.addWidget(self._logout_btn)
 
-        mid_col = ctk.CTkScrollableFrame(
-            mid_outer,
-            fg_color="transparent",
-            corner_radius=0,
-            scrollbar_button_color=COLORS["border"],
-            scrollbar_button_hover_color=COLORS["accent"],
-        )
-        mid_col.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+    def _build_main_area(self, parent_layout: QHBoxLayout) -> None:
+        main = QWidget()
+        main.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        parent_layout.addWidget(main, stretch=1)
 
-        # ── RIGHT HALF: speech output ──────────────────────────
-        right_col = ctk.CTkFrame(body, fg_color=COLORS["bg_secondary"], corner_radius=12,
-                                 border_width=1, border_color=COLORS["border"])
-        right_col.grid(row=0, column=1, sticky="nsew")
-        right_col.grid_rowconfigure(0, weight=1)
-        right_col.grid_columnconfigure(0, weight=1)
+        ml = QVBoxLayout(main)
+        ml.setContentsMargins(24, 20, 24, 20)
+        ml.setSpacing(16)
 
-        self._build_camera_panel(left_col)
-        self._build_status_panel(mid_col)
-        self._build_output_panel(mid_col)
-        self._build_sequence_panel(mid_col)
-        self._build_speech_panel(right_col)
+        # Top bar
+        topbar = QHBoxLayout()
+        title = QLabel("Real-time Gesture Translation")
+        title.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        _set_font(title, 22, bold=True)
+        topbar.addWidget(title)
+        topbar.addStretch()
 
-    # ── Camera panel (left) ────────────────────────────────
+        self._speech_toggle_btn = QPushButton("🔇 Live Speech: OFF")
+        self._speech_toggle_btn.setFixedHeight(34)
+        self._speech_toggle_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._speech_toggle_btn.clicked.connect(self._toggle_speech)
+        self._update_speech_toggle_ui()
+        topbar.addWidget(self._speech_toggle_btn)
+        ml.addLayout(topbar)
 
-    def _build_camera_panel(self, parent):
-        panel = ctk.CTkFrame(parent, fg_color=COLORS["bg_primary"], corner_radius=12,
-                             border_width=1, border_color=COLORS["border"])
-        panel.grid(row=0, column=0, sticky="nsew")
-        panel.grid_rowconfigure(1, weight=1)
-        panel.grid_columnconfigure(0, weight=1)
+        # Three-column layout: camera | gesture status | speech output
+        split = QHBoxLayout()
+        split.setSpacing(14)
+        self._build_camera_panel(split)   # col 1
+        self._build_right_panel(split)    # col 2
+        self._build_speech_panel(split)   # col 3
+        ml.addLayout(split, stretch=1)
 
-        cam_hdr = ctk.CTkFrame(panel, fg_color="transparent")
-        cam_hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 8))
-        ctk.CTkLabel(
-            cam_hdr, text="📷  Live Detection",
-            font=(FONT_PRIMARY, 14, "bold"),
-            text_color=COLORS["text_primary"]
-        ).pack(side="left")
-        self._fps_label = ctk.CTkLabel(
-            cam_hdr, text="FPS: --",
-            font=FONT_SMALL, text_color=COLORS["text_muted"]
-        )
-        self._fps_label.pack(side="right")
+        # Start / Stop buttons
+        btn_row = QHBoxLayout()
+        self._start_btn = QPushButton("▶  Start Detection")
+        self._start_btn.setFixedHeight(40)
+        self._start_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._start_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('success')};
+                color: #FFFFFF; border: none; border-radius: 8px;
+                font-family: 'Segoe UI'; font-size: 13px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: #17876A; }}
+            QPushButton:disabled {{ background-color: {c('border')}; color: {c('text_muted')}; }}
+        """)
+        self._start_btn.clicked.connect(self._start_detection)
 
-        self._cam_label = ctk.CTkLabel(
-            panel, text="", fg_color=("#0D1117", "#0D1117"), corner_radius=8)
-        self._cam_label.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 12))
-        self._cam_label.grid_propagate(False)
+        self._stop_btn = QPushButton("■  Stop Detection")
+        self._stop_btn.setFixedHeight(40)
+        self._stop_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('error')};
+                color: #FFFFFF; border: none; border-radius: 8px;
+                font-family: 'Segoe UI'; font-size: 13px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: #C0392B; }}
+            QPushButton:disabled {{ background-color: {c('border')}; color: {c('text_muted')}; }}
+        """)
+        self._stop_btn.clicked.connect(self._stop_detection)
 
-        self._cam_placeholder = ctk.CTkFrame(
-            self._cam_label, fg_color=("#1A1F2E", "#1A1F2E"),
-            corner_radius=14, border_width=1, border_color=("#2A3050", "#2A3050")
-        )
-        self._cam_placeholder.place(relx=0.5, rely=0.5, anchor="center")
+        btn_row.addWidget(self._start_btn)
+        btn_row.addWidget(self._stop_btn)
+        ml.addLayout(btn_row)
 
-        ctk.CTkLabel(
-            self._cam_placeholder, text="📸",
-            font=("Arial", 32), text_color=COLORS["cyan"]
-        ).pack(pady=(22, 6))
-        ctk.CTkLabel(
-            self._cam_placeholder, text="Camera Offline",
-            font=(FONT_PRIMARY, 16, "bold"), text_color=("#E2E8F0", "#E2E8F0")
-        ).pack(padx=40)
-        ctk.CTkLabel(
-            self._cam_placeholder,
-            text="Click 'Start Detection' below\\nto activate your webcam and begin.",
-            font=(FONT_PRIMARY, 12), text_color=("#94A3B8", "#94A3B8"), justify="center"
-        ).pack(padx=40, pady=(4, 22))
+    def _build_camera_panel(self, parent_layout: QHBoxLayout) -> None:
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 14px;
+            }}
+        """)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 14, 14, 14)
 
-        toolbar = ctk.CTkFrame(panel, fg_color="transparent")
-        toolbar.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 16))
+        # FPS label
+        fps_row = QHBoxLayout()
+        cam_title = QLabel("📷  Live Detection")
+        cam_title.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
+        _set_font(cam_title, 14, bold=True)
+        fps_row.addWidget(cam_title)
+        fps_row.addStretch()
+        self._fps_label = QLabel("FPS: --")
+        self._fps_label.setStyleSheet(f"color: {c('text_muted')}; background: transparent; border: none;")
+        _set_font(self._fps_label, 11)
+        fps_row.addWidget(self._fps_label)
+        layout.addLayout(fps_row)
 
-        self._start_btn = ctk.CTkButton(
-            toolbar, text="▶  Start Detection",
-            command=self._start_detection,
-            font=FONT_BTN, fg_color=COLORS["success"], hover_color=COLORS["success"],
-            text_color=("#FFFFFF", "#FFFFFF"), height=40, corner_radius=8
-        )
-        self._start_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        # Camera feed label
+        self._cam_label = QLabel()
+        self._cam_label.setStyleSheet("background-color: #0D1117; border-radius: 8px; border: none;")
+        self._cam_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._cam_label.setMinimumSize(320, 240)
+        layout.addWidget(self._cam_label, stretch=1)
 
-        self._stop_btn = ctk.CTkButton(
-            toolbar, text="■  Stop Detection",
-            command=self._stop_detection,
-            font=FONT_BTN, fg_color=COLORS["error"], hover_color=COLORS["error"],
-            text_color=("#FFFFFF", "#FFFFFF"), height=40, corner_radius=8,
-            state="disabled"
-        )
-        self._stop_btn.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        # Placeholder
+        self._cam_placeholder = QLabel("📸\n\nCamera Offline\n\nClick 'Start Detection' to activate your webcam.")
+        self._cam_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._cam_placeholder.setStyleSheet(f"color: {c('text_muted')}; background: transparent; font-size: 14px; border: none;")
+        self._cam_placeholder.setWordWrap(True)
+        layout.addWidget(self._cam_placeholder)
 
-        self._live_speech_btn = ctk.CTkButton(
-            toolbar, text="🔇  Live Speech: OFF",
-            command=self._toggle_live_speech,
-            font=FONT_BTN,
-            fg_color=COLORS["badge_gray_bg"],
-            hover_color=COLORS["input_bg"],
-            text_color=("#FFFFFF", "#FFFFFF"),
-            height=40, corner_radius=8
-        )
-        self._live_speech_btn.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        parent_layout.addWidget(card, stretch=5)
 
-    # ── Gesture status panel (middle) ──────────────────────
+    def _build_right_panel(self, parent_layout: QHBoxLayout) -> None:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
 
-    def _build_status_panel(self, parent):
-        panel = ctk.CTkFrame(parent, fg_color=COLORS["bg_primary"], corner_radius=12,
-                             border_width=1, border_color=COLORS["border"])
-        panel.pack(fill="x", padx=4, pady=(4, 8))
+        # ── Status card ───────────────────────────────────
+        status_card = QFrame()
+        status_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 14px;
+            }}
+        """)
+        s_layout = QVBoxLayout(status_card)
+        s_layout.setContentsMargins(20, 16, 20, 16)
 
-        hdr = ctk.CTkFrame(panel, fg_color="transparent")
-        hdr.pack(fill="x", padx=16, pady=(12, 4))
-        ctk.CTkLabel(
-            hdr, text="⬡  Gesture Status",
-            font=(FONT_PRIMARY, 14, "bold"),
-            text_color=COLORS["text_primary"]
-        ).pack(side="left")
+        hdr = QHBoxLayout()
+        s_lbl = QLabel("System Status")
+        s_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        _set_font(s_lbl, 11, bold=True)
+        hdr.addWidget(s_lbl)
+        hdr.addStretch()
+        self._status_pill = QLabel("⏸  Detection stopped")
+        self._status_pill.setStyleSheet(
+            f"background-color: {c('badge_gray_bg')}; color: {c('badge_gray_fg')};"
+            " border-radius: 10px; padding: 4px 10px; font-weight: bold; border: none;")
+        hdr.addWidget(self._status_pill)
+        s_layout.addLayout(hdr)
+        s_layout.addSpacing(10)
 
-        # Thin divider line
-        ctk.CTkFrame(panel, height=1, fg_color=COLORS["border"]).pack(fill="x", padx=16, pady=(0, 10))
+        self._gesture_label = QLabel("—")
+        self._gesture_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._gesture_label.setStyleSheet(f"color: {c('accent')}; border: none; background: transparent;")
+        _set_font(self._gesture_label, 48, bold=True)
+        s_layout.addWidget(self._gesture_label)
 
-        result_card = ctk.CTkFrame(
-            panel, fg_color=COLORS["input_bg"], corner_radius=10,
-            border_width=1, border_color=COLORS["border"]
-        )
-        result_card.pack(fill="x", padx=16, pady=(0, 12))
+        self._gesture_name_label = QLabel("Waiting for gesture...")
+        self._gesture_name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._gesture_name_label.setStyleSheet(f"color: {c('text_secondary')}; border: none; background: transparent;")
+        _set_font(self._gesture_name_label, 12)
+        s_layout.addWidget(self._gesture_name_label)
+        layout.addWidget(status_card)
 
-        self._gesture_label = ctk.CTkLabel(
-            result_card, text="—",
-            font=("Georgia", 52, "bold"), text_color=COLORS["accent"]
-        )
-        self._gesture_label.pack(pady=(12, 2))
-        self._gesture_name_label = ctk.CTkLabel(
-            result_card, text="Waiting for gesture...",
-            font=(FONT_PRIMARY, 12), text_color=COLORS["text_secondary"]
-        )
-        self._gesture_name_label.pack(pady=(0, 12))
+        # ── Confidence card ───────────────────────────────
+        conf_card = QFrame()
+        conf_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 14px;
+            }}
+        """)
+        c_layout = QVBoxLayout(conf_card)
+        c_layout.setContentsMargins(20, 14, 20, 14)
 
-        conf_frame = ctk.CTkFrame(panel, fg_color="transparent")
-        conf_frame.pack(fill="x", padx=16, pady=(0, 8))
-        conf_row = ctk.CTkFrame(conf_frame, fg_color="transparent")
-        conf_row.pack(fill="x", pady=(0, 4))
-        ctk.CTkLabel(
-            conf_row, text="Confidence",
-            font=(FONT_PRIMARY, 12), text_color=COLORS["text_secondary"]
-        ).pack(side="left")
-        self._conf_value_label = ctk.CTkLabel(
-            conf_row, text="0%",
-            font=(FONT_PRIMARY, 13, "bold"), text_color=COLORS["text_muted"]
-        )
-        self._conf_value_label.pack(side="right")
+        ch = QHBoxLayout()
+        c_lbl = QLabel("Match Confidence")
+        c_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        _set_font(c_lbl, 11, bold=True)
+        ch.addWidget(c_lbl)
+        ch.addStretch()
+        self._conf_value_label = QLabel("0%")
+        self._conf_value_label.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        _set_font(self._conf_value_label, 12, bold=True)
+        ch.addWidget(self._conf_value_label)
+        c_layout.addLayout(ch)
 
-        self._conf_bar = ctk.CTkProgressBar(
-            conf_frame, height=6, corner_radius=3,
-            progress_color=COLORS["badge_gray_bg"], fg_color=COLORS["border"]
-        )
-        self._conf_bar.pack(fill="x")
-        self._conf_bar.set(0)
+        self._conf_bar = QProgressBar()
+        self._conf_bar.setTextVisible(False)
+        self._conf_bar.setRange(0, 100)
+        self._conf_bar.setValue(0)
+        self._conf_bar.setFixedHeight(6)
+        self._conf_bar.setStyleSheet(f"""
+            QProgressBar {{ background-color: {c('border')}; border: none; border-radius: 3px; }}
+            QProgressBar::chunk {{ background-color: {c('badge_gray_bg')}; border-radius: 3px; }}
+        """)
+        c_layout.addWidget(self._conf_bar)
 
-        # Hold Progress Bar
-        self._hold_progress_bar = ctk.CTkProgressBar(
-            conf_frame, height=4, corner_radius=2,
-            progress_color=COLORS["badge_gray_bg"], fg_color=COLORS["border"]
-        )
-        self._hold_progress_bar.pack(fill="x", pady=(8, 0))
-        self._hold_progress_bar.set(0)
+        # Hold progress bar
+        hold_row = QHBoxLayout()
+        h_lbl = QLabel("Hold to confirm:")
+        h_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        _set_font(h_lbl, 10)
+        hold_row.addWidget(h_lbl)
 
-        self._conf_warning = ctk.CTkLabel(
-            panel, text="", font=(FONT_PRIMARY, 11),
-            text_color=COLORS["warn"], fg_color="transparent"
-        )
-        self._conf_warning.pack(padx=16, anchor="w", pady=(0, 4))
+        self._hold_bar = QProgressBar()
+        self._hold_bar.setTextVisible(False)
+        self._hold_bar.setRange(0, 100)
+        self._hold_bar.setValue(0)
+        self._hold_bar.setFixedHeight(6)
+        self._hold_bar.setStyleSheet(f"""
+            QProgressBar {{ background-color: {c('border')}; border: none; border-radius: 3px; }}
+            QProgressBar::chunk {{ background-color: {c('cyan')}; border-radius: 3px; }}
+        """)
+        hold_row.addWidget(self._hold_bar)
+        c_layout.addLayout(hold_row)
 
-        self._status_pill = ctk.CTkFrame(
-            panel, fg_color=COLORS["badge_gray_bg"], corner_radius=8
-        )
-        self._status_pill.pack(anchor="w", padx=16, pady=(4, 16))
-        self._status_label = ctk.CTkLabel(
-            self._status_pill, text="⏸  Detection stopped",
-            font=(FONT_PRIMARY, 11), text_color=COLORS["badge_gray_fg"]
-        )
-        self._status_label.pack(padx=10, pady=5)
+        self._conf_warning = QLabel("")
+        self._conf_warning.setStyleSheet(f"color: {c('warn')}; border: none; background: transparent;")
+        _set_font(self._conf_warning, 10)
+        c_layout.addWidget(self._conf_warning)
+        layout.addWidget(conf_card)
 
-    def _build_output_panel(self, parent):
-        panel = ctk.CTkFrame(parent, fg_color=COLORS["bg_primary"], corner_radius=12,
-                             border_width=1, border_color=COLORS["border"])
-        panel.pack(fill="x", padx=4, pady=(0, 8))
+        # ── Output card ───────────────────────────────────
+        out_card = QFrame()
+        out_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 14px;
+            }}
+        """)
+        o_layout = QVBoxLayout(out_card)
+        o_layout.setContentsMargins(20, 14, 20, 14)
 
-        out_hdr = ctk.CTkFrame(panel, fg_color="transparent")
-        out_hdr.pack(fill="x", padx=16, pady=(12, 6))
-        ctk.CTkLabel(
-            out_hdr, text="💬  Communication Output",
-            font=(FONT_PRIMARY, 13, "bold"), text_color=COLORS["text_primary"]
-        ).pack(side="left")
-        ctk.CTkButton(
-            out_hdr, text="Clear", command=self._clear_output,
-            font=(FONT_PRIMARY, 11), fg_color="transparent",
-            hover_color=COLORS["input_bg"], text_color=COLORS["accent"],
-            width=50, height=24, corner_radius=4
-        ).pack(side="right")
+        oh = QHBoxLayout()
+        o_lbl = QLabel("Current Output")
+        o_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        _set_font(o_lbl, 11, bold=True)
+        oh.addWidget(o_lbl)
+        oh.addStretch()
+        clr_btn = QPushButton("Clear")
+        clr_btn.setStyleSheet(f"background: transparent; color: {c('error')}; border: none; font-size: 11px;")
+        clr_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        clr_btn.clicked.connect(self._clear_output)
+        oh.addWidget(clr_btn)
+        o_layout.addLayout(oh)
 
-        self._output_textbox = ctk.CTkTextbox(
-            panel, font=("Consolas", 20),
-            fg_color=COLORS["input_bg"], text_color=COLORS["text_primary"],
-            wrap="word", height=60,
-            border_width=1, border_color=COLORS["border"], corner_radius=8
-        )
-        self._output_textbox.pack(fill="x", padx=16, pady=(0, 12))
-        self._output_textbox.configure(state="disabled")
+        self._output_textbox = QTextEdit()
+        self._output_textbox.setReadOnly(True)
+        self._output_textbox.setFixedHeight(56)
+        self._output_textbox.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {c('input_bg')}; border: 1px solid {c('border')};
+                border-radius: 8px; color: {c('text_primary')};
+                font-family: 'Consolas'; font-size: 16px; padding: 8px;
+            }}
+        """)
+        o_layout.addWidget(self._output_textbox)
 
-        ctk.CTkLabel(
-            panel, text="🧾  Final Sentence",
-            font=(FONT_PRIMARY, 13, "bold"), text_color=COLORS["text_primary"]
-        ).pack(fill="x", padx=16, pady=(0, 6), anchor="w")
+        f_lbl = QLabel("Finalized Sentences")
+        f_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        _set_font(f_lbl, 11, bold=True)
+        o_layout.addWidget(f_lbl)
 
-        self._final_sentence_label = ctk.CTkTextbox(
-            panel, font=("Consolas", 20, "bold"),
-            fg_color=COLORS["success_bg"], text_color=COLORS["text_primary"],
-            wrap="word", height=45,
-            border_width=1, border_color=COLORS["success"], corner_radius=8
-        )
-        self._final_sentence_label.pack(fill="x", padx=16, pady=(0, 16))
-        self._final_sentence_label.configure(state="disabled")
+        self._final_sentence_label = QTextEdit()
+        self._final_sentence_label.setReadOnly(True)
+        self._final_sentence_label.setFixedHeight(56)
+        self._final_sentence_label.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {c('success_bg')}; border: 1px solid {c('success')};
+                border-radius: 8px; color: {c('text_primary')};
+                font-family: 'Consolas'; font-size: 14px; padding: 8px;
+            }}
+        """)
+        o_layout.addWidget(self._final_sentence_label)
+        layout.addWidget(out_card)
 
-    def _build_sequence_panel(self, parent):
-        panel = ctk.CTkFrame(parent, fg_color=COLORS["bg_primary"], corner_radius=12,
-                             border_width=1, border_color=COLORS["border"])
-        panel.pack(fill="x", padx=4, pady=(0, 8))
+        # ── Gesture sequence ──────────────────────────────
+        seq_card = QFrame()
+        seq_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 14px;
+            }}
+        """)
+        sq = QVBoxLayout(seq_card)
+        sq.setContentsMargins(20, 14, 20, 14)
 
-        seq_hdr = ctk.CTkFrame(panel, fg_color="transparent")
-        seq_hdr.pack(fill="x", padx=16, pady=(12, 6))
-        ctk.CTkLabel(
-            seq_hdr, text="📋  Gesture Sequence",
-            font=(FONT_PRIMARY, 12, "bold"), text_color=COLORS["text_primary"]
-        ).pack(side="left")
-        ctk.CTkButton(
-            seq_hdr, text="Clear", command=self._clear_history,
-            font=(FONT_PRIMARY, 11), fg_color="transparent",
-            hover_color=COLORS["input_bg"], text_color=COLORS["text_muted"],
-            width=40, height=20, corner_radius=4
-        ).pack(side="right")
+        sh = QHBoxLayout()
+        seq_lbl = QLabel("📋  Gesture Sequence")
+        seq_lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
+        _set_font(seq_lbl, 12, bold=True)
+        sh.addWidget(seq_lbl)
+        sh.addStretch()
+        seq_clr = QPushButton("Clear")
+        seq_clr.setStyleSheet(f"background: transparent; color: {c('text_muted')}; border: none; font-size: 11px;")
+        seq_clr.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        seq_clr.clicked.connect(self._clear_history)
+        sh.addWidget(seq_clr)
+        sq.addLayout(sh)
 
-        self._history_textbox = ctk.CTkTextbox(
-            panel, font=("Consolas", 14),
-            fg_color=COLORS["input_bg"], text_color=COLORS["text_secondary"],
-            wrap="word", border_width=0, corner_radius=8,
-            height=120,
-        )
-        self._history_textbox.pack(fill="x", padx=16, pady=(0, 16))
-        self._history_textbox.configure(state="disabled")
+        self._history_textbox = QTextEdit()
+        self._history_textbox.setReadOnly(True)
+        self._history_textbox.setFixedHeight(80)
+        self._history_textbox.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {c('input_bg')}; border: 1px solid {c('border')};
+                border-radius: 8px; color: {c('text_secondary')};
+                font-family: 'Consolas'; font-size: 13px; padding: 8px;
+            }}
+        """)
+        sq.addWidget(self._history_textbox)
+        layout.addWidget(seq_card)
 
-    # ── Speech output panel (right) ────────────────────────
+        layout.addStretch()
+        parent_layout.addWidget(panel, stretch=3)
 
-    def _build_speech_panel(self, parent):
-        panel = ctk.CTkFrame(parent, fg_color=COLORS["bg_primary"], corner_radius=12,
-                             border_width=1, border_color=COLORS["border"])
-        panel.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+    def _build_speech_panel(self, parent_layout: QHBoxLayout) -> None:
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 14px;
+            }}
+        """)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
 
         # Header
-        hdr = ctk.CTkFrame(panel, fg_color="transparent")
-        hdr.pack(fill="x", padx=16, pady=(12, 8))
+        hdr = QHBoxLayout()
+        title = QLabel("🔊  Speech Output")
+        title.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
+        _set_font(title, 14, bold=True)
+        hdr.addWidget(title)
+        hdr.addStretch()
 
-        ctk.CTkLabel(
-            hdr, text="🔊  Speech Output",
-            font=(FONT_PRIMARY, 14, "bold"),
-            text_color=COLORS["text_primary"]
-        ).pack(side="left")
+        self._tts_status_pill = QLabel("⏸ Idle")
+        self._tts_status_pill.setStyleSheet(
+            f"background-color: {c('badge_gray_bg')}; color: {c('badge_gray_fg')};"
+            " border-radius: 10px; padding: 3px 10px; font-weight: bold; border: none; font-size: 11px;")
+        hdr.addWidget(self._tts_status_pill)
+        layout.addLayout(hdr)
 
-        # TTS status pill
-        self._tts_status_pill = ctk.CTkFrame(
-            hdr, fg_color=COLORS["badge_gray_bg"], corner_radius=12
-        )
-        self._tts_status_pill.pack(side="left", padx=8)
-        self._tts_status_label = ctk.CTkLabel(
-            self._tts_status_pill, text="⏸ Idle",
-            font=(FONT_PRIMARY, 11, "bold"),
-            text_color=COLORS["badge_gray_fg"]
-        )
-        self._tts_status_label.pack(padx=10, pady=4)
+        # Voice Selector
+        voice_row = QHBoxLayout()
+        voice_lbl = QLabel("Voice:")
+        voice_lbl.setStyleSheet(f"color: {c('text_muted')}; background: transparent; border: none;")
+        _set_font(voice_lbl, 11)
+        voice_row.addWidget(voice_lbl)
 
-        if not self.tts._available:
-            self._set_tts_status("🔴 Unavailable", COLORS["error_bg"], COLORS["error"])
+        self._voice_combo = QComboBox()
+        self._voice_combo.addItems(["🔊 Default", "♀ Female", "♂ Male"])
+        self._voice_combo.setFixedHeight(30)
+        self._voice_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {c('input_bg')}; border: 1px solid {c('input_border')};
+                border-radius: 8px; padding: 2px 10px; font-family: 'Segoe UI'; font-size: 12px; color: {c('text_primary')};
+            }}
+            QComboBox::drop-down {{ border: none; width: 20px; }}
+            QComboBox QAbstractItemView {{
+                background-color: {c('bg_primary')}; border: 1px solid {c('border')};
+                selection-background-color: {c('accent')}; color: {c('text_primary')};
+            }}
+        """)
+        saved_voice = config.get("speech.voice", "default")
+        voice_map = {"default": 0, "female": 1, "male": 2}
+        self._voice_combo.setCurrentIndex(voice_map.get(saved_voice, 0))
+        self._voice_combo.currentIndexChanged.connect(self._on_voice_changed)
+        voice_row.addWidget(self._voice_combo, 1)
+        layout.addLayout(voice_row)
 
-        # Voice badge
-        self._voice_badge = self._build_voice_badge(hdr)
+        # Sentences Header
+        sent_hdr = QHBoxLayout()
+        sent_lbl = QLabel("Finalized Sentences")
+        sent_lbl.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; border: none;")
+        _set_font(sent_lbl, 12, bold=True)
+        sent_hdr.addWidget(sent_lbl)
+        sent_hdr.addStretch()
 
-        # Play All button
-        ctk.CTkButton(
-            hdr, text="▶ Play All", command=self._play_all,
-            font=FONT_BTN, fg_color=COLORS["success"],
-            hover_color=COLORS["success"],
-            text_color=("#FFFFFF", "#FFFFFF"),
-            width=90, height=30, corner_radius=6
-        ).pack(side="right")
+        play_all_btn = QPushButton("▶ Play All")
+        play_all_btn.setFixedHeight(28)
+        play_all_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        play_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('success')}; color: #FFFFFF; border: none; border-radius: 6px;
+                font-family: 'Segoe UI'; font-size: 11px; font-weight: bold; padding: 0 10px;
+            }}
+            QPushButton:hover {{ background-color: #17876A; }}
+        """)
+        play_all_btn.clicked.connect(self._play_all)
+        sent_hdr.addWidget(play_all_btn)
 
-        # Subheader: Finalized Sentences + Clear All
-        sent_hdr = ctk.CTkFrame(panel, fg_color="transparent")
-        sent_hdr.pack(fill="x", padx=16, pady=(0, 6))
+        clear_all_btn = QPushButton("Clear All")
+        clear_all_btn.setFixedHeight(28)
+        clear_all_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        clear_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent; color: {c('error')}; border: 1px solid {c('error')};
+                border-radius: 6px; font-family: 'Segoe UI'; font-size: 11px; padding: 0 10px;
+            }}
+            QPushButton:hover {{ background-color: {c('error_bg')}; }}
+        """)
+        clear_all_btn.clicked.connect(self._clear_all_sentences)
+        sent_hdr.addWidget(clear_all_btn)
+        layout.addLayout(sent_hdr)
 
-        ctk.CTkLabel(
-            sent_hdr, text="Finalized Sentences",
-            font=(FONT_PRIMARY, 12, "bold"),
-            text_color=COLORS["text_secondary"]
-        ).pack(side="left")
+        # Sentence List Container
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{ background-color: {c('bg_secondary')}; border: 1px solid {c('border')}; border-radius: 8px; }}
+        """)
 
-        ctk.CTkButton(
-            sent_hdr, text="Clear All",
-            command=self._clear_all_sentences,
-            font=(FONT_PRIMARY, 11),
-            fg_color="transparent",
-            hover_color=COLORS["error_bg"],
-            text_color=COLORS["error"],
-            width=70, height=24, corner_radius=4
-        ).pack(side="right")
+        self._sentences_container = QWidget()
+        self._sentences_container.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        self._sentences_layout = QVBoxLayout(self._sentences_container)
+        self._sentences_layout.setContentsMargins(8, 8, 8, 8)
+        self._sentences_layout.setSpacing(6)
+        self._sentences_layout.addStretch()
 
-        # Scrollable sentence list
-        self._scroll_frame = ctk.CTkScrollableFrame(
-            panel, fg_color=COLORS["bg_secondary"], corner_radius=8,
-            border_width=1, border_color=COLORS["border"]
-        )
-        self._scroll_frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        scroll.setWidget(self._sentences_container)
+        layout.addWidget(scroll, stretch=1)
 
-        # Populate existing sentences (if any)
+        parent_layout.addWidget(card, stretch=4)
         self._populate_sentences()
 
-    def _build_voice_badge(self, parent) -> ctk.CTkLabel:
-        preference = config.get("speech.voice", "default")
-        icon, label = _VOICE_LABELS.get(preference, ("🔊", "Default"))
-        badge = ctk.CTkLabel(
-            parent,
-            text=f"{icon} {label} voice",
-            font=(FONT_PRIMARY, 11),
-            text_color=COLORS["info"],
-            fg_color=COLORS["info_bg"],
-            corner_radius=8, height=26,
-        )
-        badge.pack(side="left", padx=(0, 4))
-        return badge
+    # ══════════════════════════════════════════════════════
+    # STATE MANAGEMENT & LIFECYCLE
+    # ══════════════════════════════════════════════════════
 
-    def _refresh_voice_badge(self):
-        preference = config.get("speech.voice", "default")
-        icon, label = _VOICE_LABELS.get(preference, ("🔊", "Default"))
-        self._voice_badge.configure(text=f"{icon} {label} voice")
-
-    # ── TTS status helpers ─────────────────────────────────
-
-    def _set_tts_status(self, text, bg, fg):
-        self._tts_status_pill.configure(fg_color=bg)
-        self._tts_status_label.configure(text=text, text_color=fg)
-
-    # ── Sentence list ──────────────────────────────────────
-
-    def _populate_sentences(self):
-        for widget in self._scroll_frame.winfo_children():
-            widget.destroy()
-
-        sentences = speech_buffer.get_all()
-
-        if not sentences:
-            ctk.CTkLabel(
-                self._scroll_frame,
-                text="No finalized sentences yet.",
-                font=FONT_SUBHEAD, text_color=COLORS["text_muted"]
-            ).pack(pady=30)
-            return
-
-        for i, sentence in enumerate(sentences):
-            row = ctk.CTkFrame(
-                self._scroll_frame,
-                fg_color=COLORS["input_bg"], corner_radius=8
+    def _start_detection(self) -> None:
+        if not self._permission_granted:
+            reply = QMessageBox.question(
+                self, "Camera Permission Required",
+                "SignDesk requires access to your webcam to detect hand gestures.\n\nAllow SignDesk to use your camera?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
-            row.pack(fill="x", padx=8, pady=6)
-
-            # × remove button
-            ctk.CTkButton(
-                row, text="×", width=28, height=28,
-                font=("Segoe UI", 14),
-                fg_color="transparent",
-                hover_color=COLORS["error_bg"],
-                text_color=COLORS["text_muted"],
-                command=lambda idx=i: self._remove_sentence(idx)
-            ).pack(side="left", padx=(8, 0), pady=10)
-
-            lbl = ctk.CTkTextbox(
-                row, font=("Consolas", 13),
-                text_color=COLORS["text_primary"],
-                fg_color="transparent",
-                wrap="word", height=46
-            )
-            lbl.insert("1.0", sentence)
-            lbl.configure(state="disabled")
-            lbl.pack(side="left", padx=8, pady=10, fill="both", expand=True)
-
-            ctk.CTkButton(
-                row, text="▶", width=36, height=36,
-                font=("Segoe UI Emoji", 13),
-                fg_color=COLORS["accent"],
-                hover_color=COLORS["panel_left_end"],
-                command=lambda s=sentence: self._play_single(s)
-            ).pack(side="right", padx=10, pady=10)
-
-    def _refresh_sentences(self):
-        """Re-populates the sentence list — called after a new sentence is finalized."""
-        self._populate_sentences()
-
-    def _remove_sentence(self, index: int):
-        """Remove one sentence by index and refresh the list."""
-        speech_buffer.remove_at(index)
-        self._refresh_sentences()
-
-    def _clear_all_sentences(self):
-        """Clear all finalized sentences and refresh the list."""
-        speech_buffer.clear()
-        self._refresh_sentences()
-
-    # ── TTS playback ───────────────────────────────────────
-
-    def _play_single(self, sentence: str):
-        if self.tts._available:
-            self._set_tts_status("🟢 Playing", COLORS["success_bg"], COLORS["success"])
-            self.after(
-                2500,
-                lambda: self._set_tts_status(
-                    "⏸ Idle", COLORS["badge_gray_bg"], COLORS["badge_gray_fg"]
-                ) if self.tts._available else None
-            )
-        self.tts.speak(sentence)
-
-    def _play_all(self):
-        sentences = speech_buffer.get_all()
-        if not sentences:
-            self._handle_tts_error("No text available for speech conversion.")
-            return
-        self._play_single(". ".join(sentences))
-
-    def _handle_tts_error(self, message: str):
-        if self._live_speech_enabled:
-            return   # Silently ignore TTS errors during live speech — no popup
-        self.after(0, lambda: self._show_tts_error(message))
-
-    def _speak_async(self, text: str):
-        """Speaks text in a background thread. Silently ignores errors in live mode."""
-        try:
-            self.tts.speak(text)
-        except Exception:
-            pass
-        finally:
-            self._tts_speaking = False
-
-    def _show_tts_error(self, message: str):
-        self._set_tts_status("🔴 Unavailable", COLORS["error_bg"], COLORS["error"])
-        messagebox.showerror("Audio Error", message)
-
-    # ── Detection lifecycle ────────────────────────────────
-
-    def _start_detection(self):
-        if getattr(self, "_permission_granted", False) == False:
-            response = messagebox.askyesno(
-                "Camera Permission Required",
-                "SignDesk requires access to your webcam to detect hand gestures.\\n\\n"
-                "Allow SignDesk to use your camera?"
-            )
-            if not response:
-                messagebox.showerror(
-                    "Permission Denied",
-                    "Webcam permission denied. Please enable camera access.")
+            if reply != QMessageBox.StandardButton.Yes:
+                QMessageBox.critical(self, "Permission Denied", "Webcam permission denied.")
                 return
             self._permission_granted = True
 
         success, message = self._camera.start()
         if not success:
-            messagebox.showerror("Webcam Error", message)
+            QMessageBox.critical(self, "Webcam Error", message)
             return
 
         self._is_detecting = True
-        self._start_btn.configure(state="disabled")
-        self._stop_btn.configure(state="normal")
-        self._cam_placeholder.place_forget()
+        self._start_btn.setEnabled(False)
+        self._stop_btn.setEnabled(True)
+        self._cam_placeholder.setVisible(False)
 
-        self._status_pill.configure(fg_color=COLORS["info_bg"])
-        self._status_label.configure(text="🔵  Detecting...", text_color=COLORS["info"])
-        self._gesture_name_label.configure(text="Looking for gesture...")
-        self._update_loop()
+        self._set_status_pill("🔵  Detecting…", c("info_bg"), c("info"))
+        self._gesture_name_label.setText("Looking for gesture…")
+        self._update_timer.start()
 
-    def _stop_detection(self):
+    def _stop_detection(self) -> None:
         self._is_detecting = False
-        if self._update_job is not None:
-            self.after_cancel(self._update_job)
-            self._update_job = None
-
+        self._update_timer.stop()
         self._camera.stop()
-        self._start_btn.configure(state="normal")
-        self._stop_btn.configure(state="disabled")
 
-        self._set_status_pill("⏸  Detection stopped", COLORS["badge_gray_bg"], COLORS["badge_gray_fg"])
-        self._gesture_label.configure(text="—")
-        self._gesture_name_label.configure(text="Waiting for gesture...")
-        self._conf_value_label.configure(text="0%", text_color=COLORS["text_muted"])
-        self._conf_bar.set(0)
-        self._conf_bar.configure(progress_color=COLORS["badge_gray_bg"])
-        self._conf_warning.configure(text="")
+        self._start_btn.setEnabled(True)
+        self._stop_btn.setEnabled(False)
+        self._cam_placeholder.setVisible(True)
+        self._cam_label.clear()
+
+        self._set_status_pill("⏸  Detection stopped", c("badge_gray_bg"), c("badge_gray_fg"))
+        self._gesture_label.setText("—")
+        self._gesture_name_label.setText("Waiting for gesture…")
+        self._conf_value_label.setText("0%")
+        self._conf_bar.setValue(0)
+        self._hold_bar.setValue(0)
+        self._conf_warning.setText("")
+        self._fps_label.setText("FPS: --")
 
         self._text_buffer.clear()
         self._sentence_builder.reset()
         word_assembler.cancel()
         self._refresh_output()
-        if hasattr(self, "_final_sentence_label"):
-            self._final_sentence_label.configure(state="normal")
-            self._final_sentence_label.delete("1.0", "end")
-            self._final_sentence_label.configure(state="disabled")
 
-        self._cam_placeholder.place(relx=0.5, rely=0.5, anchor="center")
-        self._cam_label.configure(image=None)
-
-    def _set_status_pill(self, text, bg, fg):
-        self._status_pill.configure(fg_color=bg)
-        self._status_label.configure(text=text, text_color=fg)
-
-    def _toggle_live_speech(self):
+    def _toggle_speech(self) -> None:
         self._live_speech_enabled = not self._live_speech_enabled
         word_assembler.set_live_speech(self._live_speech_enabled)
-        
+        self._update_speech_toggle_ui()
+
+    def _update_speech_toggle_ui(self) -> None:
         if self._live_speech_enabled:
-            self._live_speech_btn.configure(
-                text="🔊  Live Speech: ON",
-                fg_color=COLORS["success"],
-                hover_color=COLORS["success"],
-            )
+            self._speech_toggle_btn.setText("🔊 Live Speech: ON")
+            self._speech_toggle_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {c('success_bg')}; color: {c('success')};
+                    border: 1px solid {c('success')}; border-radius: 17px;
+                    font-weight: bold; padding: 4px 16px;
+                }}
+            """)
         else:
-            self._live_speech_btn.configure(
-                text="🔇  Live Speech: OFF",
-                fg_color=COLORS["badge_gray_bg"],
-                hover_color=COLORS["input_bg"],
-            )
+            self._speech_toggle_btn.setText("🔇 Live Speech: OFF")
+            self._speech_toggle_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent; color: {c('text_muted')};
+                    border: 1px solid {c('text_muted')}; border-radius: 17px;
+                    font-weight: bold; padding: 4px 16px;
+                }}
+            """)
 
-    def _update_hold_bar(self, progress: float):
-        """
-        Updates the hold progress bar color based on hold progress.
-
-        Progress states:
-          0.0       = no gesture / idle       → gray
-          0.0–1.0   = holding in progress     → warn (amber)
-          1.0       = hold confirmed          → success (green)
-
-        Wrapped in try/except so a bad color key never
-        crashes the Tkinter callback and freezes the camera.
-        """
+    def _on_voice_changed(self, index: int) -> None:
+        voice_keys = ["default", "female", "male"]
+        selected = voice_keys[index]
+        config.set("speech.voice", selected)
         try:
-            self._hold_progress_bar.set(progress)
+            self._tts.set_voice(selected)
+        except Exception:
+            pass
 
-            if progress >= 1.0:
-                # Hold confirmed — green
-                self._hold_progress_bar.configure(
-                    progress_color=COLORS["success"]
-                )
-            elif progress > 0.0:
-                # Holding in progress — amber
-                # ✅ FIXED: was COLORS["warning"] → KeyError every frame
-                self._hold_progress_bar.configure(
-                    progress_color=COLORS["warn"]
-                )
-            else:
-                # No gesture — gray
-                self._hold_progress_bar.configure(
-                    progress_color=COLORS["badge_gray_bg"]
-                )
+    def _handle_tts_error(self, message: str) -> None:
+        if not self._live_speech_enabled:
+            QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Audio Error", message))
 
-        except KeyError as e:
-            # Safety net: bad color key should never freeze the camera
-            print(f"[UI] WARNING: Missing color key in _update_hold_bar: {e}")
-        except Exception as e:
-            # Any other UI error — log and continue, never crash the loop
-            print(f"[UI] WARNING: _update_hold_bar failed: {e}")
+    # ══════════════════════════════════════════════════════
+    # DETECTION LOGIC
+    # ══════════════════════════════════════════════════════
 
-    def _update_loop(self):
+    def _update_loop(self) -> None:
         if not self._is_detecting:
             return
 
         success, frame, fps = self._camera.read_frame()
-
         if not success or frame is None:
-            self._set_status_pill(
-                "⚠  Camera feed interrupted",
-                COLORS["error_bg"], COLORS["error"]
-            )
-            self._update_job = self.after(self.UPDATE_INTERVAL, self._update_loop)
+            self._set_status_pill("⚠  Camera feed interrupted", c("error_bg"), c("error"))
             return
 
-        self._fps_label.configure(text=f"FPS: {fps:.0f}")
+        self._fps_label.setText(f"FPS: {fps:.0f}")
+
         hand_detected, landmarks, annotated_frame = self._tracker.process_frame(frame)
 
         if hand_detected and landmarks:
             gesture, confidence = self._recognizer.recognize(landmarks)
-
-            # Update hold progress bar every frame regardless of state
-            progress = self._recognizer.hold_progress
-            self._update_hold_bar(progress)
-
-            # Get hold state BEFORE branching
-            current = self._recognizer.current_hold_gesture
-
-            # ── STATE A: Hold complete — gesture committed ─────────────────
-            if gesture is not None:
-                self._update_confidence(confidence)
-
-                if not self._gesture_history or \
-                   self._gesture_history[-1] != gesture:
-                    self._add_to_history(gesture, confidence)
-
-                text_char = map_gesture_to_text(gesture)
-                if self._text_buffer.append_if_new(text_char):
-                    self._sentence_builder.add_gesture(
-                        text_char, time.monotonic()
-                    )
-                    self._refresh_output()
-                    if self._live_speech_enabled:
-                        word_assembler.add_letter(text_char)
-
-                self._recognizer.reset_hold()
-                self._gesture_label.configure(text=gesture)
-                self._gesture_name_label.configure(
-                    text=f"ASL Letter: {gesture}"
-                )
-                self._set_status_pill(
-                    f"🟢  Gesture committed: {gesture}",
-                    COLORS["success_bg"], COLORS["success"]
-                )
-                print(f"[UI] State A — committed: '{gesture}'")
-
-            # ── STATE B: Hold in progress — user actively signing ──────────
-            elif current is not None:
-                # DO NOT call add_space() — hold is in progress
-                # DO NOT reset confidence bar
-                # DO NOT show "Gesture unclear"
-                self._gesture_label.configure(text=current)
-                self._gesture_name_label.configure(
-                    text=f"ASL Letter: {current}"
-                )
-                self._set_status_pill(
-                    f"⏳  Holding: {current}...",
-                    COLORS["info_bg"], COLORS["info"]
-                )
-                print(
-                    f"[UI] State B — holding '{current}' "
-                    f"({self._recognizer.hold_progress * 100:.0f}%)"
-                )
-
-            # ── STATE C: Truly no gesture — safe to insert space ───────────
-            else:
-                self._gesture_label.configure(text="—")
-                self._gesture_name_label.configure(text="Gesture unclear")
-                self._update_confidence(0.0)   # safe to reset here only
-
-                if self._text_buffer.maybe_insert_space():
-                    self._refresh_output()
-                    if self._live_speech_enabled:
-                        word_assembler.add_space()  # safe — no hold active
-
-                self._set_status_pill(
-                    "🔍  Analyzing...",
-                    COLORS["info_bg"], COLORS["info"]
-                )
-                print("[UI] State C — no gesture, inserting space if needed")
-
+            self._update_hold_bar(self._recognizer.hold_progress)
+            self._process_gesture_state(gesture, confidence, self._recognizer.current_hold_gesture)
         else:
-            # ── NO HAND in frame ───────────────────────────────────────────
-            self._gesture_label.configure(text="—")
-            self._gesture_name_label.configure(text="Gesture unclear")
-            self._update_confidence(0.0)
-            self._update_hold_bar(0.0)   # reset progress bar
+            self._process_no_gesture()
 
-            if self._text_buffer.maybe_insert_space():
-                self._refresh_output()
-                if self._live_speech_enabled:
-                    word_assembler.add_space()
-
-            self._set_status_pill(
-                "🔵  No hand detected",
-                COLORS["info_bg"], COLORS["info"]
-            )
-            print("[UI] No hand — space inserted if needed")
-
-        # ── Sentence finalization ──────────────────────────────────────────
-        current_time = time.monotonic()
-        if self._sentence_builder.should_finalize(current_time):
-            final_sentence = self._sentence_builder.finalize()
-            if final_sentence:
-                self._final_sentence_label.configure(state="normal")
-                self._final_sentence_label.delete("1.0", "end")
-                self._final_sentence_label.insert("1.0", final_sentence)
-                self._final_sentence_label.configure(state="disabled")
-                speech_buffer.push(final_sentence)
+        # Sentence finalization
+        if self._sentence_builder.should_finalize(time.monotonic()):
+            final = self._sentence_builder.finalize()
+            if final:
+                self._final_sentence_label.setPlainText(final)
+                speech_buffer.push(final)
                 self._refresh_sentences()
-
             self._sentence_builder.reset()
             self._text_buffer.clear()
             self._refresh_output()
 
         self._display_frame(annotated_frame)
-        self._update_job = self.after(self.UPDATE_INTERVAL, self._update_loop)
 
-    def _display_frame(self, frame):
+    def _process_gesture_state(self, gesture: str | None, confidence: float, current_hold: str | None) -> None:
+        if gesture is not None:
+            self._update_confidence(confidence)
+            if not self._gesture_history or self._gesture_history[-1] != gesture:
+                self._add_to_history(gesture, confidence)
+
+            text_char = map_gesture_to_text(gesture)
+            if self._text_buffer.append_if_new(text_char):
+                self._sentence_builder.add_gesture(text_char, time.monotonic())
+                self._refresh_output()
+                if self._live_speech_enabled:
+                    word_assembler.add_letter(text_char)
+
+            self._recognizer.reset_hold()
+            self._gesture_label.setText(gesture)
+            self._gesture_name_label.setText(f"ASL Letter: {gesture}")
+            self._set_status_pill(f"🟢  Committed: {gesture}", c("success_bg"), c("success"))
+
+        elif current_hold is not None:
+            self._gesture_label.setText(current_hold)
+            self._gesture_name_label.setText(f"ASL Letter: {current_hold}")
+            self._set_status_pill(f"⏳  Holding: {current_hold}…", c("info_bg"), c("info"))
+
+        else:
+            self._gesture_label.setText("—")
+            self._gesture_name_label.setText("Gesture unclear")
+            self._update_confidence(0.0)
+            if self._text_buffer.maybe_insert_space():
+                self._refresh_output()
+                if self._live_speech_enabled:
+                    word_assembler.add_space()
+            self._set_status_pill("🔍  Analyzing…", c("info_bg"), c("info"))
+
+    def _process_no_gesture(self) -> None:
+        self._gesture_label.setText("—")
+        self._gesture_name_label.setText("No hand detected")
+        self._update_confidence(0.0)
+        self._update_hold_bar(0.0)
+        if self._text_buffer.maybe_insert_space():
+            self._refresh_output()
+            if self._live_speech_enabled:
+                word_assembler.add_space()
+        self._set_status_pill("🔵  No hand detected", c("info_bg"), c("info"))
+
+    # ══════════════════════════════════════════════════════
+    # SPEECH LOGIC
+    # ══════════════════════════════════════════════════════
+
+    def _populate_sentences(self) -> None:
+        while self._sentences_layout.count() > 1:
+            item = self._sentences_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        sentences = speech_buffer.get_all()
+        if not sentences:
+            empty = QLabel("No finalized sentences yet.")
+            empty.setStyleSheet(f"color: {c('text_muted')}; background: transparent; border: none;")
+            _set_font(empty, 11)
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._sentences_layout.insertWidget(0, empty)
+            return
+
+        for i, sentence in enumerate(sentences):
+            row = QFrame()
+            row.setStyleSheet(f"QFrame {{ background-color: {c('bg_primary')}; border: 1px solid {c('border')}; border-radius: 8px; }}")
+            r = QHBoxLayout(row)
+            r.setContentsMargins(8, 8, 8, 8)
+            r.setSpacing(6)
+
+            remove_btn = QPushButton("×")
+            remove_btn.setFixedSize(26, 26)
+            remove_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            remove_btn.setStyleSheet(f"QPushButton {{ background: transparent; color: {c('text_muted')}; border: none; font-size: 14px; border-radius: 4px; }} QPushButton:hover {{ background-color: {c('error_bg')}; color: {c('error')}; }}")
+            remove_btn.clicked.connect(lambda _, idx=i: self._remove_sentence(idx))
+            r.addWidget(remove_btn)
+
+            txt = QLabel(sentence)
+            txt.setWordWrap(True)
+            txt.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none; font-family: 'Consolas'; font-size: 13px;")
+            r.addWidget(txt, 1)
+
+            play_btn = QPushButton("▶")
+            play_btn.setFixedSize(32, 32)
+            play_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            play_btn.setStyleSheet(f"QPushButton {{ background-color: {c('accent')}; color: #FFFFFF; border: none; border-radius: 6px; font-size: 12px; }} QPushButton:hover {{ background-color: {c('accent_hover')}; }}")
+            play_btn.clicked.connect(lambda _, s=sentence: self._play_single(s))
+            r.addWidget(play_btn)
+
+            self._sentences_layout.insertWidget(self._sentences_layout.count() - 1, row)
+
+    def _refresh_sentences(self) -> None:
+        self._populate_sentences()
+
+    def _remove_sentence(self, index: int) -> None:
+        speech_buffer.remove_at(index)
+        self._populate_sentences()
+
+    def _clear_all_sentences(self) -> None:
+        speech_buffer.clear()
+        self._populate_sentences()
+
+    def _play_single(self, sentence: str) -> None:
+        self._set_tts_status("🟢 Playing", c("success_bg"), c("success"))
+        QTimer.singleShot(2500, lambda: self._set_tts_status("⏸ Idle", c("badge_gray_bg"), c("badge_gray_fg")))
+        self._tts.speak(sentence)
+
+    def _play_all(self) -> None:
+        sentences = speech_buffer.get_all()
+        if not sentences:
+            QMessageBox.information(self, "Speech Output", "No sentences to play.")
+            return
+        self._play_single(". ".join(sentences))
+
+    # ══════════════════════════════════════════════════════
+    # UTILITY / UI HELPERS
+    # ══════════════════════════════════════════════════════
+
+    def _display_frame(self, frame) -> None:
         try:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame_rgb)
-            w = self._cam_label.winfo_width()
-            h = self._cam_label.winfo_height()
-            if w > 1 and h > 1:
-                max_w = min(w, 900)
-                max_h = min(h, 700)
-                img = ImageOps.contain(img, (max_w, max_h), Image.LANCZOS)
-            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
-            self._cam_label.configure(image=ctk_img, text="")
-            self._cam_label._ctk_image = ctk_img
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb.shape
+            qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+            lw, lh = self._cam_label.width(), self._cam_label.height()
+            if lw > 1 and lh > 1:
+                px = QPixmap.fromImage(qimg).scaled(lw, lh, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self._cam_label.setPixmap(px)
         except Exception:
             pass
 
-    def _update_confidence(self, confidence: float):
+    def _set_status_pill(self, text: str, bg: str, fg: str) -> None:
+        self._status_pill.setText(text)
+        self._status_pill.setStyleSheet(f"background-color: {bg}; color: {fg}; border-radius: 10px; padding: 4px 10px; font-weight: bold; border: none;")
+
+    def _set_tts_status(self, text: str, bg: str, fg: str) -> None:
+        self._tts_status_pill.setText(text)
+        self._tts_status_pill.setStyleSheet(f"background-color: {bg}; color: {fg}; border-radius: 10px; padding: 3px 10px; font-weight: bold; border: none; font-size: 11px;")
+
+    def _update_hold_bar(self, progress: float) -> None:
+        pct = int(min(1.0, max(0.0, progress)) * 100)
+        self._hold_bar.setValue(pct)
+        color = c("success") if pct >= 100 else c("warn") if pct > 0 else c("badge_gray_bg")
+        self._hold_bar.setStyleSheet(f"QProgressBar {{ background-color: {c('border')}; border: none; border-radius: 3px; }} QProgressBar::chunk {{ background-color: {color}; border-radius: 3px; }}")
+
+    def _update_confidence(self, confidence: float) -> None:
         pct = int(confidence * 100)
-        self._conf_value_label.configure(text=f"{pct}%")
-        self._conf_bar.set(confidence)
-
+        self._conf_value_label.setText(f"{pct}%")
+        self._conf_bar.setValue(pct)
+        
         if confidence >= 0.80:
-            color = COLORS["success"]
-            self._conf_warning.configure(text="")
+            color = c("success")
+            self._conf_warning.setText("")
         elif confidence >= 0.60:
-            color = COLORS["warn"]
-            self._conf_warning.configure(text="⚠ Improve positioning")
+            color = c("warn")
+            self._conf_warning.setText("⚠ Improve positioning")
         else:
-            color = COLORS["error"]
-            self._conf_warning.configure(text="⚠ Low confidence")
+            color = c("error")
+            self._conf_warning.setText("⚠ Low confidence")
+            
+        self._conf_bar.setStyleSheet(f"QProgressBar {{ background-color: {c('border')}; border: none; border-radius: 3px; }} QProgressBar::chunk {{ background-color: {color}; border-radius: 3px; }}")
+        self._conf_value_label.setStyleSheet(f"color: {color}; border: none; background: transparent;")
 
-        self._conf_bar.configure(progress_color=color)
-        self._conf_value_label.configure(text_color=color)
-
-    def _add_to_history(self, gesture: str, confidence: float):
-        """
-        Appends gesture to the in-page sequence display AND
-        persists it to SQLite via log_gesture() if logging is enabled.
-        """
-        # ── In-page gesture sequence display (unchanged) ──
+    def _add_to_history(self, gesture: str, confidence: float) -> None:
         self._gesture_history.append(gesture)
         if len(self._gesture_history) > self._max_history:
             self._gesture_history = self._gesture_history[-self._max_history:]
-        self._history_textbox.configure(state="normal")
-        self._history_textbox.delete("1.0", "end")
-        self._history_textbox.insert("1.0", " ".join(self._gesture_history))
-        self._history_textbox.configure(state="disabled")
-        self._history_textbox.see("end")
-
-        # ── Real-time persistent logging (PATCH) ─────────
+        self._history_textbox.setPlainText(" ".join(self._gesture_history))
+        sb = self._history_textbox.verticalScrollBar()
+        sb.setValue(sb.maximum())
         try:
             from modules.gesture_history.backend import log_gesture
             translated = map_gesture_to_text(gesture) or gesture
-            user_id = self._app.current_user_id
-            log_gesture(user_id, gesture, translated, confidence)
+            log_gesture(self._app.current_user_id, gesture, translated, confidence)
         except Exception as e:
-            # Never let a logging error crash the detection loop
             print(f"[GestureHistory] log_gesture failed: {e}")
 
-    def _clear_history(self):
-        self._gesture_history.clear()
-        self._history_textbox.configure(state="normal")
-        self._history_textbox.delete("1.0", "end")
-        self._history_textbox.configure(state="disabled")
+    def _refresh_output(self) -> None:
+        self._output_textbox.setPlainText(self._text_buffer.get())
+        sb = self._output_textbox.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
-    def _refresh_output(self):
-        text = self._text_buffer.get()
-        self._output_textbox.configure(state="normal")
-        self._output_textbox.delete("1.0", "end")
-        if text:
-            self._output_textbox.insert("1.0", text)
-        self._output_textbox.configure(state="disabled")
-        self._output_textbox.see("end")
-
-    def _clear_output(self):
+    def _clear_output(self) -> None:
         self._text_buffer.clear()
         self._refresh_output()
 
-    def _on_back(self):
+    def _clear_history(self) -> None:
+        self._gesture_history.clear()
+        self._history_textbox.clear()
+
+    # ── App Navigation ────────────────────────────────────
+
+    def _on_back(self) -> None:
         self._stop_detection()
-        self._tracker.release()
+        try:
+            self._tracker.release()
+        except Exception:
+            pass
         self._app.show_dashboard(self._username)
 
-    def _on_logout(self):
-        if messagebox.askyesno("Logout", "Are you sure you want to log out?"):
+    def _on_logout(self) -> None:
+        reply = QMessageBox.question(
+            self, "Logout", "Are you sure you want to log out?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
             self._stop_detection()
-            self._tracker.release()
+            try:
+                self._tracker.release()
+            except Exception:
+                pass
             self._app.show_login()
 
-    def destroy(self):
+    def destroy(self) -> None:
         self._stop_detection()
         word_assembler.cancel()
         try:

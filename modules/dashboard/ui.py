@@ -1,27 +1,39 @@
 """
 modules/dashboard/ui.py - Dashboard UI
-Modern soft-gradient SaaS dashboard with sidebar navigation.
+PyQt6 migration — CustomTkinter dependency fully removed.
 """
 
-import customtkinter as ctk
-from tkinter import Canvas, messagebox
 import os
-from PIL import Image
-from core.theme import *
-from core.ui_helpers import (
-    build_steps_panel, create_gradient_canvas, create_nav_item,
-    _lerp_color,
+from PyQt6.QtWidgets import (
+    QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, 
+    QScrollArea, QLineEdit, QMessageBox, QGridLayout
 )
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QCursor
 
+from core.theme import c
+from core.ui_helpers import create_nav_item, build_steps_panel, _set_font
 
-class DashboardPage(ctk.CTkFrame):
-    SIDEBAR_W = 210
+class GradientSidebar(QFrame):
+    """Sidebar with vertical gradient background."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(210)
 
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        grad = QLinearGradient(0, 0, 0, self.height())
+        # Sidebar is typically always dark-ish, we'll use light/dark params appropriately if needed
+        grad.setColorAt(0, QColor(c("panel_left", dark=True)))
+        grad.setColorAt(1, QColor(c("panel_left_end", dark=True)))
+        painter.fillRect(self.rect(), grad)
+
+class DashboardPage(QWidget):
     def __init__(self, parent, app, username: str):
-        super().__init__(parent, fg_color=C_DASH_BG, corner_radius=0)
-        self._app      = app
+        super().__init__(parent)
+        self._app = app
         self._username = username
-        self._sidebar_images = []       # prevent GC of logo image
+        self.setStyleSheet(f"background-color: {c('bg_secondary')};")
         self._build()
 
     # ── Navigation callbacks ───────────────────────────────
@@ -33,234 +45,275 @@ class DashboardPage(ctk.CTkFrame):
         if hasattr(self._app, 'show_settings'):
             self._app.show_settings(self._username)
 
-
-
     def _launch_gesture_history(self):
         self._app.show_gesture_history(self._username)
 
     def _on_logout(self):
-        if messagebox.askyesno("Logout", "Are you sure you want to log out?"):
+        reply = QMessageBox.question(
+            self, "Logout", "Are you sure you want to log out?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
             self._app.show_login()
 
     # ── Main build ─────────────────────────────────────────
 
     def _build(self):
-        # Two-column layout: sidebar | main content
-        self.grid_columnconfigure(0, weight=0, minsize=self.SIDEBAR_W)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        self._build_sidebar()
-        self._build_main_area()
+        self._build_sidebar(layout)
+        self._build_main_area(layout)
 
     # ══════════════════════════════════════════════════════════
     # SIDEBAR
     # ══════════════════════════════════════════════════════════
 
-    def _build_sidebar(self):
-        sidebar = ctk.CTkFrame(
-            self, width=self.SIDEBAR_W, fg_color=C_SIDEBAR_START,
-            corner_radius=0,
-        )
-        sidebar.grid(row=0, column=0, sticky="nsew")
-        sidebar.grid_propagate(False)
+    def _build_sidebar(self, parent_layout):
+        sidebar = GradientSidebar(self)
+        parent_layout.addWidget(sidebar)
 
-        # Gradient background canvas
-        gradient = create_gradient_canvas(
-            sidebar, self.SIDEBAR_W, 700,
-            color_start=C_SIDEBAR_START, color_end=C_SIDEBAR_END,
-        )
-        gradient.place(x=0, y=0, relwidth=1, relheight=1)
-
-        # Content overlay (transparent, on top of gradient)
-        content = ctk.CTkFrame(sidebar, fg_color="transparent")
-        content.place(x=0, y=0, relwidth=1, relheight=1)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(16, 24, 16, 20)
+        layout.setSpacing(0)
 
         # ── Logo + brand ──────────────────────────────────
-        brand = ctk.CTkFrame(content, fg_color="transparent")
-        brand.pack(fill="x", padx=16, pady=(20, 24))
+        brand_layout = QHBoxLayout()
+        brand_layout.setContentsMargins(0, 0, 0, 0)
+        brand_layout.setSpacing(10)
+        brand_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         logo_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "assets", "logo.png"
         )
-        brand_row = ctk.CTkFrame(brand, fg_color="transparent")
-        brand_row.pack(anchor="w")
 
         if os.path.exists(logo_path):
-            try:
-                logo_img = ctk.CTkImage(Image.open(logo_path), size=(36, 36))
-                self._sidebar_images.append(logo_img)
-                ctk.CTkLabel(
-                    brand_row, image=logo_img, text="", fg_color="transparent"
-                ).pack(side="left", padx=(0, 10))
-            except Exception:
-                pass
+            logo_lbl = QLabel()
+            pixmap = QPixmap(logo_path).scaled(
+                36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+            )
+            logo_lbl.setPixmap(pixmap)
+            logo_lbl.setStyleSheet("background: transparent;")
+            brand_layout.addWidget(logo_lbl)
 
-        ctk.CTkLabel(
-            brand_row, text="SignDesk",
-            font=(FONT_PRIMARY, 16, "bold"),
-            text_color=C_WHITE, fg_color="transparent",
-        ).pack(side="left")
+        title_lbl = QLabel("SignDesk")
+        title_lbl.setStyleSheet("color: #FFFFFF; background: transparent;")
+        _set_font(title_lbl, size=16, bold=True)
+        brand_layout.addWidget(title_lbl)
 
+        layout.addLayout(brand_layout)
+        
         # Subtle divider
-        ctk.CTkFrame(
-            content, height=1, fg_color="#4A4590"
-        ).pack(fill="x", padx=16, pady=(0, 16))
+        div1 = QFrame()
+        div1.setFixedHeight(1)
+        div1.setStyleSheet("background-color: #4A4590; border: none;")
+        layout.addSpacing(16)
+        layout.addWidget(div1)
+        layout.addSpacing(16)
 
         # ── Navigation items ──────────────────────────────
-        nav_frame = ctk.CTkFrame(content, fg_color="transparent")
-        nav_frame.pack(fill="x", padx=12)
+        nav_layout = QVBoxLayout()
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(2)
 
-        create_nav_item(nav_frame, "📊", "Dashboard",
-                        is_active=True, command=None)
-        create_nav_item(nav_frame, "🖐️", "Gesture Translator",
-                        is_active=False,
-                        command=self._launch_gesture_detection)
+        nav_layout.addWidget(create_nav_item(sidebar, "📊", "Dashboard", is_active=True, dark=True))
+        nav_layout.addWidget(create_nav_item(sidebar, "🖐️", "Gesture Translator", command=self._launch_gesture_detection, dark=True))
+        nav_layout.addWidget(create_nav_item(sidebar, "📖", "Sign Dictionary", dark=True))
+        nav_layout.addWidget(create_nav_item(sidebar, "📈", "Gesture History", command=self._launch_gesture_history, dark=True))
 
-        create_nav_item(nav_frame, "📖", "Sign Dictionary",
-                        is_active=False, command=None)
-        create_nav_item(nav_frame, "📈", "Gesture History",
-                        is_active=False, command=self._launch_gesture_history)
-
-        # Spacer
-        ctk.CTkFrame(content, fg_color="transparent").pack(
-            fill="both", expand=True)
+        layout.addLayout(nav_layout)
+        layout.addStretch()
 
         # ── Bottom section — divider + logout ─────────────
-        ctk.CTkFrame(
-            content, height=1, fg_color="#4A4590"
-        ).pack(fill="x", padx=16, pady=(0, 8))
+        div2 = QFrame()
+        div2.setFixedHeight(1)
+        div2.setStyleSheet("background-color: #4A4590; border: none;")
+        layout.addWidget(div2)
+        layout.addSpacing(8)
 
-        bottom = ctk.CTkFrame(content, fg_color="transparent")
-        bottom.pack(fill="x", padx=12, pady=(0, 20))
+        bottom_layout = QVBoxLayout()
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(2)
 
-        create_nav_item(bottom, "⚙️", "Settings",
-                        is_active=False, command=self._launch_settings)
+        bottom_layout.addWidget(create_nav_item(sidebar, "⚙️", "Settings", command=self._launch_settings, dark=True))
 
-        logout_frame = ctk.CTkFrame(bottom, fg_color="transparent",
-                                     corner_radius=10, height=38)
-        logout_frame.pack(fill="x", pady=(2, 0))
-        logout_frame.pack_propagate(False)
+        # Custom logout item with red text
+        logout_btn = QWidget()
+        logout_btn.setFixedHeight(38)
+        logout_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        logout_btn.setStyleSheet("background: transparent; border-radius: 10px;")
+        lo_layout = QHBoxLayout(logout_btn)
+        lo_layout.setContentsMargins(12, 0, 12, 0)
+        lo_layout.setSpacing(8)
+        
+        lo_icon = QLabel("🚪")
+        lo_icon.setFixedWidth(24)
+        lo_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lo_icon.setStyleSheet("color: #FF8A80; font-family: 'Segoe UI Emoji'; font-size: 14px; background: transparent;")
+        lo_text = QLabel("Logout")
+        lo_text.setStyleSheet("color: #FF8A80; background: transparent;")
+        _set_font(lo_text, size=12, bold=False)
+        
+        lo_layout.addWidget(lo_icon)
+        lo_layout.addWidget(lo_text)
+        lo_layout.addStretch()
 
-        logout_inner = ctk.CTkFrame(logout_frame, fg_color="transparent")
-        logout_inner.pack(fill="x", padx=12, expand=True)
+        # Hover logic for logout
+        def enterEvent(e): logout_btn.setStyleSheet("background-color: #3D4470; border-radius: 10px;")
+        def leaveEvent(e): logout_btn.setStyleSheet("background-color: transparent; border-radius: 10px;")
+        def mousePressEvent(e): 
+            if e.button() == Qt.MouseButton.LeftButton:
+                self._on_logout()
+        logout_btn.enterEvent = enterEvent
+        logout_btn.leaveEvent = leaveEvent
+        logout_btn.mousePressEvent = mousePressEvent
 
-        lo_icon = ctk.CTkLabel(
-            logout_inner, text="🚪", font=("Segoe UI Emoji", 14),
-            text_color="#FF8A80", fg_color="transparent", width=24,
-        )
-        lo_icon.pack(side="left", padx=(0, 8))
-        lo_text = ctk.CTkLabel(
-            logout_inner, text="Logout", font=FONT_SIDEBAR,
-            text_color="#FF8A80", fg_color="transparent", anchor="w",
-        )
-        lo_text.pack(side="left")
-
-        for w in (logout_frame, logout_inner, lo_icon, lo_text):
-            w.configure(cursor="hand2")
-            w.bind("<Button-1>", lambda e: self._on_logout())
+        bottom_layout.addWidget(logout_btn)
+        layout.addLayout(bottom_layout)
 
     # ══════════════════════════════════════════════════════════
     # MAIN CONTENT AREA
     # ══════════════════════════════════════════════════════════
 
-    def _build_main_area(self):
-        main = ctk.CTkFrame(self, fg_color=C_DASH_BG, corner_radius=0)
-        main.grid(row=0, column=1, sticky="nsew")
+    def _build_main_area(self, parent_layout):
+        main = QWidget()
+        main.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        parent_layout.addWidget(main, stretch=1)
 
-        self._build_topbar(main)
+        main_layout = QVBoxLayout(main)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        body = ctk.CTkScrollableFrame(
-            main, fg_color=C_DASH_BG, corner_radius=0
-        )
-        body.pack(fill="both", expand=True, padx=28, pady=(8, 20))
+        self._build_topbar(main_layout)
 
-        self._build_welcome(body)
-        self._build_stats(body)
-        self._build_status(body)
-        self._build_how_to_use(body)
-        self._build_footer(body)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        
+        body = QWidget()
+        body.setStyleSheet("background: transparent;")
+        scroll.setWidget(body)
+
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(28, 8, 28, 20)
+        body_layout.setSpacing(20)
+
+        self._build_welcome(body_layout)
+        self._build_stats(body_layout)
+        self._build_status(body_layout)
+        self._build_how_to_use(body_layout)
+        self._build_footer(body_layout)
+        
+        body_layout.addStretch()
+        main_layout.addWidget(scroll)
 
     # ── Top Bar ────────────────────────────────────────────
 
-    def _build_topbar(self, parent):
-        topbar = ctk.CTkFrame(parent, height=60, fg_color="transparent",
-                               corner_radius=0)
-        topbar.pack(fill="x", padx=28, pady=(16, 4))
-        topbar.pack_propagate(False)
+    def _build_topbar(self, parent_layout):
+        topbar = QWidget()
+        topbar.setFixedHeight(60)
+        parent_layout.addWidget(topbar)
 
+        layout = QHBoxLayout(topbar)
+        layout.setContentsMargins(28, 16, 28, 4)
+        
         # Left: greeting
-        ctk.CTkLabel(
-            topbar, text=f"Welcome back, {self._username} 👋",
-            font=(FONT_PRIMARY, 16, "bold"),
-            text_color=C_TEXT_DARK, fg_color="transparent",
-        ).pack(side="left", pady=12)
+        greeting = QLabel(f"Welcome back, {self._username} 👋")
+        greeting.setStyleSheet(f"color: {c('text_primary')};")
+        _set_font(greeting, size=16, bold=True)
+        layout.addWidget(greeting)
+        
+        layout.addStretch()
 
         # Right: search bar
-        search_frame = ctk.CTkFrame(
-            topbar, fg_color=C_INPUT_BG, corner_radius=18,
-            border_width=1, border_color=C_CARD_BORDER,
-        )
-        search_frame.pack(side="right", pady=12)
-
-        ctk.CTkLabel(
-            search_frame, text="🔍",
-            font=("Segoe UI Emoji", 12),
-            text_color=C_TEXT_LIGHT, fg_color="transparent",
-        ).pack(side="left", padx=(12, 4))
-
-        search_entry = ctk.CTkEntry(
-            search_frame,
-            placeholder_text="Search...",
-            font=(FONT_PRIMARY, 11),
-            fg_color="transparent", border_width=0,
-            text_color=C_TEXT_DARK,
-            placeholder_text_color=C_TEXT_LIGHT,
-            height=30, width=160,
-        )
-        search_entry.pack(side="left", padx=(0, 12))
+        search_frame = QFrame()
+        search_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('input_bg')};
+                border: 1px solid {c('border')};
+                border-radius: 18px;
+            }}
+        """)
+        search_frame.setFixedHeight(36)
+        s_layout = QHBoxLayout(search_frame)
+        s_layout.setContentsMargins(12, 0, 12, 0)
+        
+        s_icon = QLabel("🔍")
+        s_icon.setStyleSheet(f"color: {c('text_muted')}; font-family: 'Segoe UI Emoji'; border: none; background: transparent;")
+        
+        s_entry = QLineEdit()
+        s_entry.setPlaceholderText("Search...")
+        s_entry.setStyleSheet(f"""
+            QLineEdit {{
+                border: none;
+                background: transparent;
+                color: {c('text_primary')};
+                font-family: 'Segoe UI';
+                font-size: 11px;
+            }}
+        """)
+        s_entry.setFixedWidth(160)
+        
+        s_layout.addWidget(s_icon)
+        s_layout.addWidget(s_entry)
+        
+        layout.addWidget(search_frame)
+        layout.addSpacing(12)
 
         # Avatar circle
-        avatar = ctk.CTkFrame(
-            topbar, width=36, height=36,
-            fg_color=C_ACCENT, corner_radius=18,
-        )
-        avatar.pack(side="right", padx=(12, 0), pady=12)
-        avatar.pack_propagate(False)
-        ctk.CTkLabel(
-            avatar, text=self._username[0].upper(),
-            font=(FONT_PRIMARY, 14, "bold"),
-            text_color=C_WHITE, fg_color="transparent",
-        ).place(relx=0.5, rely=0.5, anchor="center")
+        avatar = QLabel(self._username[0].upper())
+        avatar.setFixedSize(36, 36)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        avatar.setStyleSheet(f"""
+            QLabel {{
+                background-color: {c('accent')};
+                color: #FFFFFF;
+                border-radius: 18px;
+                font-family: 'Segoe UI';
+                font-size: 14px;
+                font-weight: bold;
+            }}
+        """)
+        layout.addWidget(avatar)
 
     # ── Welcome Banner ─────────────────────────────────────
 
-    def _build_welcome(self, parent):
-        card = ctk.CTkFrame(
-            parent, fg_color=C_INFO_BG, corner_radius=14,
-            border_width=1, border_color="#D1C4E9"
-        )
-        card.pack(fill="x", pady=(0, 20))
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.pack(padx=24, pady=18, anchor="w")
-        ctk.CTkLabel(
-            inner, text=f"Good day, {self._username} 👋",
-            font=(FONT_PRIMARY, 18, "bold"),
-            text_color="#311B92", fg_color="transparent"
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            inner,
-            text="You're successfully signed in to SignDesk. Your dashboard is ready.",
-            font=FONT_SUBHEAD, text_color=C_INFO_TEXT, fg_color="transparent"
-        ).pack(anchor="w", pady=(4, 0))
+    def _build_welcome(self, parent_layout):
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c('info_bg')};
+                border: 1px solid #D1C4E9;
+                border-radius: 14px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 18, 24, 18)
+        
+        title = QLabel(f"Good day, {self._username} 👋")
+        title.setStyleSheet("color: #311B92; border: none; background: transparent;")
+        _set_font(title, size=18, bold=True)
+        
+        desc = QLabel("You're successfully signed in to SignDesk. Your dashboard is ready.")
+        desc.setStyleSheet(f"color: {c('info')}; border: none; background: transparent;")
+        _set_font(desc, size=12)
+        
+        layout.addWidget(title)
+        layout.addWidget(desc)
+        
+        parent_layout.addWidget(card)
 
     # ── Stats Row ──────────────────────────────────────────
 
-    def _build_stats(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", pady=(0, 20))
-        frame.columnconfigure((0, 1, 2), weight=1)
+    def _build_stats(self, parent_layout):
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
 
         stats_data = [
             ("Sessions today", "3",  "📊"),
@@ -268,87 +321,103 @@ class DashboardPage(ctk.CTkFrame):
             ("Signs learned",  "24",  "✋"),
         ]
 
-        for col, (label, value, icon) in enumerate(stats_data):
-            card = ctk.CTkFrame(
-                frame, fg_color=C_CARD_BG, corner_radius=12,
-                border_width=1, border_color=C_CARD_BORDER
-            )
-            card.grid(row=0, column=col,
-                      padx=(0, 10) if col < 2 else 0,
-                      sticky="nsew")
-
+        for label, value, icon in stats_data:
+            card = QFrame()
+            card.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {c('bg_primary')};
+                    border: 1px solid {c('border')};
+                    border-radius: 12px;
+                }}
+            """)
+            c_layout = QVBoxLayout(card)
+            c_layout.setContentsMargins(16, 14, 16, 14)
+            c_layout.setSpacing(0)
+            
             # Icon circle
-            icon_circle = ctk.CTkFrame(
-                card, width=32, height=32,
-                fg_color="#EDE7F6", corner_radius=16,
-            )
-            icon_circle.pack(anchor="w", padx=16, pady=(14, 6))
-            icon_circle.pack_propagate(False)
-            ctk.CTkLabel(
-                icon_circle, text=icon, font=("Segoe UI Emoji", 12),
-                fg_color="transparent"
-            ).place(relx=0.5, rely=0.5, anchor="center")
-
-            ctk.CTkLabel(card, text=label, font=FONT_SMALL,
-                         text_color=C_TEXT_LIGHT, fg_color="transparent"
-                         ).pack(anchor="w", padx=16, pady=(0, 2))
-            ctk.CTkLabel(card, text=value,
-                         font=(FONT_PRIMARY, 22, "bold"),
-                         text_color=C_TEXT_DARK, fg_color="transparent"
-                         ).pack(anchor="w", padx=16, pady=(0, 14))
+            icon_lbl = QLabel(icon)
+            icon_lbl.setFixedSize(32, 32)
+            icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_lbl.setStyleSheet("""
+                QLabel {
+                    background-color: #EDE7F6;
+                    border-radius: 16px;
+                    font-family: 'Segoe UI Emoji';
+                    font-size: 12px;
+                    border: none;
+                }
+            """)
+            
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+            _set_font(lbl, size=11)
+            
+            val = QLabel(value)
+            val.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
+            _set_font(val, size=22, bold=True)
+            
+            c_layout.addWidget(icon_lbl)
+            c_layout.addSpacing(6)
+            c_layout.addWidget(lbl)
+            c_layout.addSpacing(2)
+            c_layout.addWidget(val)
+            
+            layout.addWidget(card)
+            
+        parent_layout.addWidget(row)
 
     # ── Module Cards ───────────────────────────────────────
 
-    def _build_status(self, parent):
-        """System status panel — replaces the old module-card navigation."""
-        ctk.CTkLabel(
-            parent, text="System Status",
-            font=(FONT_PRIMARY, 13, "bold"),
-            text_color=C_TEXT_DARK, fg_color="transparent", anchor="w"
-        ).pack(fill="x", pady=(0, 10))
+    def _build_status(self, parent_layout):
+        lbl = QLabel("System Status")
+        lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        _set_font(lbl, size=13, bold=True)
+        parent_layout.addWidget(lbl)
 
-        grid = ctk.CTkFrame(parent, fg_color="transparent")
-        grid.pack(fill="x", pady=(0, 20))
-        grid.columnconfigure((0, 1, 2), weight=1)
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
 
+        # Re-resolve colors using theme indices where possible, or fallback
         status_items = [
-            ("📷", "Camera",       "Ready",         C_BADGE_BLUE_BG,  C_BADGE_BLUE_FG),
+            ("📷", "Camera",       "Ready",         c('info_bg'),  c('info')),
             ("🔒", "Privacy Mode", "Local-only",    "#E8F5E9",        "#2E7D32"),
-            ("📈", "History Log",  self._history_status(), C_BADGE_GRAY_BG,  C_BADGE_GRAY_FG),
+            ("📈", "History Log",  self._history_status(), c('badge_gray_bg'),  c('badge_gray_fg')),
         ]
 
-        for col, (icon, title, value, bg, fg) in enumerate(status_items):
-            card = ctk.CTkFrame(
-                grid, fg_color=C_CARD_BG, corner_radius=12,
-                border_width=1, border_color=C_CARD_BORDER
-            )
-            card.grid(row=0, column=col,
-                      padx=(0, 10) if col < 2 else 0,
-                      sticky="nsew")
-
-            inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(padx=16, pady=14, anchor="w", fill="x")
-
-            # Icon badge
-            badge = ctk.CTkFrame(inner, width=32, height=32,
-                                 fg_color=bg, corner_radius=10)
-            badge.pack_propagate(False)
-            badge.pack(anchor="w", pady=(0, 8))
-            ctk.CTkLabel(badge, text=icon, font=("Segoe UI Emoji", 13),
-                         fg_color="transparent"
-                         ).place(relx=0.5, rely=0.5, anchor="center")
-
-            ctk.CTkLabel(inner, text=title, font=FONT_SMALL,
-                         text_color=C_TEXT_LIGHT, fg_color="transparent"
-                         ).pack(anchor="w", pady=(0, 2))
-
-            # Value pill
-            pill = ctk.CTkFrame(inner, fg_color=bg, corner_radius=10)
-            pill.pack(anchor="w")
-            ctk.CTkLabel(pill, text=value,
-                         font=(FONT_PRIMARY, 11, "bold"),
-                         text_color=fg, fg_color="transparent"
-                         ).pack(padx=10, pady=3)
+        for icon, title, value, bg, fg in status_items:
+            card = QFrame()
+            card.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {c('bg_primary')};
+                    border: 1px solid {c('border')};
+                    border-radius: 12px;
+                }}
+            """)
+            c_layout = QVBoxLayout(card)
+            c_layout.setContentsMargins(16, 14, 16, 14)
+            
+            icon_lbl = QLabel(icon)
+            icon_lbl.setFixedSize(32, 32)
+            icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_lbl.setStyleSheet(f"background-color: {bg}; border-radius: 10px; font-family: 'Segoe UI Emoji'; font-size: 13px; border: none;")
+            
+            t_lbl = QLabel(title)
+            t_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+            _set_font(t_lbl, size=11)
+            
+            v_lbl = QLabel(value)
+            v_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            v_lbl.setStyleSheet(f"background-color: {bg}; color: {fg}; border-radius: 10px; padding: 3px 10px; font-weight: bold; font-family: 'Segoe UI'; font-size: 11px; border: none;")
+            
+            c_layout.addWidget(icon_lbl)
+            c_layout.addWidget(t_lbl)
+            c_layout.addWidget(v_lbl, 0, Qt.AlignmentFlag.AlignLeft)
+            
+            layout.addWidget(card)
+            
+        parent_layout.addWidget(row)
 
     def _history_status(self) -> str:
         """Returns a short label for history logging state."""
@@ -361,8 +430,7 @@ class DashboardPage(ctk.CTkFrame):
 
     # ── How-to-Use Cards ───────────────────────────────────
 
-    def _build_how_to_use(self, parent):
-        """5-step instructional 'How to Use' card panel."""
+    def _build_how_to_use(self, parent_layout):
         steps = [
             (
                 "Open Gesture Translator",
@@ -385,13 +453,13 @@ class DashboardPage(ctk.CTkFrame):
                 "The translation will appear in the result panel on the right.",
             ),
         ]
-        build_steps_panel(parent, steps, card_width=120)
+        panel = build_steps_panel(self, steps, card_width=120)
+        parent_layout.addWidget(panel)
 
     # ── Footer ─────────────────────────────────────────────
 
-    def _build_footer(self, parent):
-        ctk.CTkLabel(
-            parent,
-            text="SignDesk v1.0.0  •  © 2025 SignDesk Project  •  All rights reserved",
-            font=FONT_SMALL, text_color=C_TEXT_LIGHT, fg_color="transparent"
-        ).pack(pady=(28, 4))
+    def _build_footer(self, parent_layout):
+        footer = QLabel("SignDesk v1.0.0  •  © 2025 SignDesk Project  •  All rights reserved")
+        footer.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
+        _set_font(footer, size=11)
+        parent_layout.addWidget(footer, 0, Qt.AlignmentFlag.AlignHCenter)

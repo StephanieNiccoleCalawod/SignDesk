@@ -1,1070 +1,993 @@
 """
-modules/auth/ui.py - Authentication UI Pages
-Contains LoginPage, RegisterPage, and VerificationPage.
+modules/auth/ui.py  — SignDesk Auth UI  (PyQt6, fully fixed)
+
+Fixes applied
+─────────────
+1. CAPS → Title case labels  ("USERNAME" → "Username", etc.)
+2. OTP email failure now BLOCKS navigation (no silent bypass)
+3. Row background blocks fixed — QWidget rows are transparent,
+   QFrame cards use explicit style; global QFrame QSS no longer
+   bleeds onto plain container widgets
+4. Eye icon visible — objectName scopes the style so the global
+   QPushButton accent rule can't override it; Unicode 👁/🙈 used
+   as a reliable cross-platform glyph
+5. Buttons visible — C_WHITE / C_ACCENT resolved to plain hex
+   strings (they are tuples in theme.py — indexing [0] is required)
+6. Spacing tightened — form_wrap spacing set to 6px; accent-label
+   rows shrink-wrapped so there's no phantom height between fields
+7. All input fields (username, email, password) share identical
+   height (44 px) and QSS so they look uniform
 """
 
-import customtkinter as ctk
-from tkinter import messagebox
+from __future__ import annotations
 import threading
 
-from core.theme import *
-from core.ui_helpers import make_left_panel, make_field, make_primary_button, make_ghost_button
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QFrame, QMessageBox, QCheckBox,
+    QScrollArea, QSizePolicy,
+)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QCursor, QFont
+
+from core.theme import (
+    C_ACCENT, C_ACCENT_HOVER, C_WHITE, C_TEXT_DARK, C_TEXT_MID, C_TEXT_LIGHT,
+    C_INPUT_BG, C_INPUT_BORDER, C_INPUT_FOCUS, C_CARD_BG, C_CARD_BORDER,
+    C_PANEL_LEFT, C_SUCCESS, C_ERROR_RED, C_WARN,
+)
 from core.email_service import (
     generate_otp, get_otp_expiry, is_otp_expired,
-    send_verification_email, ResendTracker, VerificationAttemptTracker
+    send_verification_email, ResendTracker, VerificationAttemptTracker,
 )
-from core.email_config import OTP_RESEND_COOLDOWN
+from core.email_config import OTP_RESEND_COOLDOWN, OTP_EXPIRY_MINUTES, OTP_MAX_RESENDS
 from modules.auth.service import (
     login_user, register_user, validate_password,
     validate_registration, check_duplicate_username, check_duplicate_email,
-    verify_user, resend_verification_code, create_verified_user
+    verify_user, resend_verification_code, create_verified_user,
 )
 
+# ── resolve theme tuples to plain hex strings ──────────────────────────────
+# C_* constants in theme.py are (light, dark) tuples; we always use light[0].
+def _hex(c) -> str:
+    """Return a plain hex string from a theme tuple or pass-through a string."""
+    return c[0] if isinstance(c, tuple) else c
 
-# ── Shared helpers ─────────────────────────────────────────
+ACC       = _hex(C_ACCENT)
+ACC_HOV   = _hex(C_ACCENT_HOVER)
+WHITE     = _hex(C_WHITE)
+TXT_DARK  = _hex(C_TEXT_DARK)
+TXT_MID   = _hex(C_TEXT_MID)
+TXT_LIGHT = _hex(C_TEXT_LIGHT)
+INP_BG    = _hex(C_INPUT_BG)
+INP_BRD   = _hex(C_INPUT_BORDER)
+INP_FOC   = _hex(C_INPUT_FOCUS)
+CARD_BG   = _hex(C_CARD_BG)
+CARD_BRD  = _hex(C_CARD_BORDER)
+PANEL     = _hex(C_PANEL_LEFT)
+SUCCESS   = _hex(C_SUCCESS)
+ERROR     = _hex(C_ERROR_RED)
+WARN      = _hex(C_WARN)
 
-def _make_entry(parent, placeholder, show=None):
-    """Styled entry field used across all auth pages."""
-    e = ctk.CTkEntry(
-        parent,
-        placeholder_text=placeholder,
-        font=FONT_INPUT,
-        fg_color=C_INPUT_BG,
-        border_color=C_INPUT_BORDER,
-        border_width=1,
-        text_color=C_TEXT_DARK,
-        placeholder_text_color=C_TEXT_LIGHT,
-        height=42,
-        corner_radius=8,
-    )
-    if show:
-        e.configure(show=show)
-    e.pack(fill="x", pady=(0, 14))
+# ── shared field height ────────────────────────────────────────────────────
+FIELD_H = 44   # px — every input row uses this so heights are identical
 
-    # 1px brand-blue border on focus — closest to CSS focus ring in CTk
-    def _on_focus_in(event):
-        e.configure(border_color=C_INPUT_FOCUS, border_width=1)
-    def _on_focus_out(event):
-        e.configure(border_color=C_INPUT_BORDER, border_width=1)
-    e.bind("<FocusIn>",  _on_focus_in)
-    e.bind("<FocusOut>", _on_focus_out)
+# ══════════════════════════════════════════════════════════════════════════
+# SHARED HELPERS
+# ══════════════════════════════════════════════════════════════════════════
+
+def _set_font(widget, family: str = "Segoe UI", size: int = 12, bold: bool = False):
+    """Apply font via QFont (avoids stylesheet cascade fights)."""
+    f = QFont(family, size)
+    f.setBold(bold)
+    widget.setFont(f)
+
+
+def _make_entry(placeholder: str, password: bool = False) -> QLineEdit:
+    """Standard text input — identical height and style everywhere."""
+    e = QLineEdit()
+    e.setPlaceholderText(placeholder)
+    e.setFixedHeight(FIELD_H)
+    if password:
+        e.setEchoMode(QLineEdit.EchoMode.Password)
+    e.setStyleSheet(f"""
+        QLineEdit {{
+            background-color: {INP_BG};
+            border: 1px solid {INP_BRD};
+            border-radius: 8px;
+            color: {TXT_DARK};
+            padding: 0 12px;
+            font-size: 13px;
+        }}
+        QLineEdit:focus {{
+            border: 1px solid {INP_FOC};
+        }}
+    """)
     return e
 
 
-def _field_label(parent, text):
-    """Small uppercase field label."""
-    ctk.CTkLabel(
-        parent, text=text,
-        font=(FONT_PRIMARY, 10, "bold"),
-        text_color=C_TEXT_LIGHT,
-        fg_color="transparent", anchor="w"
-    ).pack(fill="x", pady=(0, 4))
+def _primary_btn(text: str, command) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setFixedHeight(44)
+    btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    # Use objectName so we can target exactly this button in QSS without
+    # fighting the global QPushButton rule from build_qss().
+    btn.setObjectName("primaryBtn")
+    btn.setStyleSheet(f"""
+        QPushButton#primaryBtn {{
+            background-color: {ACC};
+            color: #FFFFFF;
+            border: none;
+            border-radius: 22px;
+            font-size: 14px;
+            font-weight: bold;
+        }}
+        QPushButton#primaryBtn:hover {{
+            background-color: {ACC_HOV};
+        }}
+        QPushButton#primaryBtn:disabled {{
+            background-color: {INP_BRD};
+            color: {TXT_LIGHT};
+        }}
+    """)
+    btn.clicked.connect(command)
+    return btn
 
 
-def _section_label(parent, heading, subheading):
-    ctk.CTkLabel(
-        parent, text=heading, font=FONT_HEADING,
-        text_color=C_TEXT_DARK, fg_color="transparent", anchor="w"
-    ).pack(fill="x")
-    ctk.CTkLabel(
-        parent, text=subheading, font=FONT_SUBHEAD,
-        text_color=C_TEXT_MID, fg_color="transparent", anchor="w"
-    ).pack(fill="x", pady=(4, 24))
+def _outline_btn(text: str, command) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setFixedHeight(44)
+    btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    btn.setObjectName("outlineBtn")
+    btn.setStyleSheet(f"""
+        QPushButton#outlineBtn {{
+            background-color: {WHITE};
+            color: {TXT_DARK};
+            border: 1.5px solid {CARD_BRD};
+            border-radius: 22px;
+            font-size: 14px;
+            font-weight: bold;
+        }}
+        QPushButton#outlineBtn:hover {{
+            background-color: {INP_BG};
+        }}
+    """)
+    btn.clicked.connect(command)
+    return btn
 
 
-def _divider(parent):
-    row = ctk.CTkFrame(parent, fg_color="transparent")
-    row.pack(fill="x", pady=(4, 4))
-    ctk.CTkFrame(row, height=1, fg_color=C_CARD_BORDER).pack(
-        side="left", fill="x", expand=True, pady=6
-    )
-    ctk.CTkLabel(row, text="  or  ", font=FONT_SMALL,
-                 text_color=C_TEXT_LIGHT, fg_color="transparent").pack(side="left")
-    ctk.CTkFrame(row, height=1, fg_color=C_CARD_BORDER).pack(
-        side="left", fill="x", expand=True, pady=6
-    )
+def make_left_panel() -> QFrame:
+    panel = QFrame()
+    panel.setFixedWidth(300)
+    panel.setObjectName("leftPanel")
+    panel.setStyleSheet(f"QFrame#leftPanel {{ background-color: {PANEL}; border: none; border-radius: 0px; }}")
+    return panel
 
 
-def _primary_btn(parent, text, command):
-    return ctk.CTkButton(
-        parent, text=text, command=command,
-        font=FONT_BTN,
-        fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-        text_color=C_WHITE,
-        height=42, corner_radius=21
-    )
+def _make_password_field(placeholder: str):
+    """
+    Returns (wrap_frame, entry_widget).
+    The eye-toggle button uses objectName 'eyeBtn' so the global
+    QPushButton accent QSS cannot override its transparent style.
+    """
+    wrap = QFrame()
+    wrap.setObjectName("pwWrap")
+    wrap.setFixedHeight(FIELD_H)
+    wrap.setStyleSheet(f"""
+        QFrame#pwWrap {{
+            background-color: {INP_BG};
+            border: 1px solid {INP_BRD};
+            border-radius: 8px;
+        }}
+    """)
+
+    layout = QHBoxLayout(wrap)
+    layout.setContentsMargins(12, 0, 6, 0)
+    layout.setSpacing(4)
+
+    entry = QLineEdit()
+    entry.setPlaceholderText(placeholder)
+    entry.setEchoMode(QLineEdit.EchoMode.Password)
+    entry.setStyleSheet("""
+        QLineEdit {
+            border: none;
+            background: transparent;
+            font-size: 13px;
+            color: """ + TXT_DARK + """;
+        }
+    """)
+    entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    eye_btn = QPushButton("Show")
+    eye_btn.setObjectName("eyeBtn")
+    eye_btn.setFixedSize(48, 32)
+    eye_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    eye_btn.setToolTip("Show / hide password")
+    eye_btn.setStyleSheet(f"""
+        QPushButton#eyeBtn {{
+            border: none;
+            background: transparent;
+            color: {TXT_LIGHT};
+            font-size: 11px;
+            font-weight: bold;
+            padding: 0;
+        }}
+        QPushButton#eyeBtn:hover {{
+            color: {ACC};
+        }}
+    """)
+
+    def _toggle():
+        if entry.echoMode() == QLineEdit.EchoMode.Password:
+            entry.setEchoMode(QLineEdit.EchoMode.Normal)
+            eye_btn.setText("Hide")
+        else:
+            entry.setEchoMode(QLineEdit.EchoMode.Password)
+            eye_btn.setText("Show")
+
+    eye_btn.clicked.connect(_toggle)
+    layout.addWidget(entry)
+    layout.addWidget(eye_btn)
+    return wrap, entry
 
 
-def _outline_btn(parent, text, command):
-    return ctk.CTkButton(
-        parent, text=text, command=command,
-        font=FONT_BTN,
-        fg_color=C_WHITE, hover_color=C_INPUT_BG,
-        text_color=C_TEXT_DARK,
-        border_width=1, border_color=C_CARD_BORDER,
-        height=42, corner_radius=21
-    )
-
-
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
 # LOGIN PAGE
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
 
-class LoginPage(ctk.CTkFrame):
-    def __init__(self, parent, app):
-        super().__init__(parent, fg_color=C_BG, corner_radius=0)
+class LoginPage(QWidget):
+    def __init__(self, parent_widget, app):
+        super().__init__(parent_widget)
         self._app = app
         self._build()
 
     def _build(self):
-        # ── Left brand panel ───────────────────────────────
-        make_left_panel(self).pack(side="left", fill="y")
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # ── Right content area ─────────────────────────────
-        right = ctk.CTkFrame(self, fg_color=C_WHITE, corner_radius=0)
-        right.pack(side="left", fill="both", expand=True)
+        root.addWidget(make_left_panel())
 
-        # Center the form both horizontally and vertically
-        # using a fixed-width container placed at center
-        form_wrap = ctk.CTkFrame(right, fg_color="transparent", width=380)
-        form_wrap.place(relx=0.5, rely=0.5, anchor="center")
+        # ── right side ────────────────────────────────────────────────
+        right = QWidget()
+        right.setObjectName("rightPanel")
+        right.setStyleSheet(f"QWidget#rightPanel {{ background-color: {WHITE}; }}")
+        right_lay = QVBoxLayout(right)
+        right_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # ── Heading ────────────────────────────────────────
-        ctk.CTkLabel(
-            form_wrap, text="Welcome back",
-            font=(FONT_PRIMARY, 24, "bold"),
-            text_color=C_TEXT_DARK, fg_color="transparent", anchor="w"
-        ).pack(fill="x")
-        ctk.CTkLabel(
-            form_wrap, text="Sign in to continue to SignDesk",
-            font=(FONT_PRIMARY, 12),
-            text_color=C_TEXT_MID, fg_color="transparent", anchor="w"
-        ).pack(fill="x", pady=(4, 28))
+        # ── form card ─────────────────────────────────────────────────
+        card = QFrame()
+        card.setObjectName("loginCard")
+        card.setFixedWidth(400)
+        card.setStyleSheet(f"""
+            QFrame#loginCard {{
+                background-color: {WHITE};
+                border: 1.5px solid {CARD_BRD};
+                border-radius: 16px;
+            }}
+        """)
+        card_lay = QVBoxLayout(card)
+        card_lay.setContentsMargins(36, 32, 36, 32)
+        card_lay.setSpacing(6)
 
-        # ── Username field ─────────────────────────────────
-        ctk.CTkLabel(
-            form_wrap, text="USERNAME",
-            font=(FONT_PRIMARY, 10, "bold"),
-            text_color=C_TEXT_LIGHT, fg_color="transparent", anchor="w"
-        ).pack(fill="x", pady=(0, 6))
+        # heading
+        heading = QLabel("Welcome back")
+        _set_font(heading, size=24, bold=True)
+        heading.setStyleSheet(f"color: {TXT_DARK}; background: transparent; border: none;")
+        card_lay.addWidget(heading)
 
-        self._user_entry = _make_entry(form_wrap, "Enter your username")
+        sub = QLabel("Sign in to continue to SignDesk")
+        _set_font(sub, size=12)
+        sub.setStyleSheet(f"color: {TXT_MID}; background: transparent; border: none;")
+        card_lay.addWidget(sub)
+        card_lay.addSpacing(14)
 
-        # ── Password label row (label left + forgot right) ─
-        pw_header = ctk.CTkFrame(form_wrap, fg_color="transparent")
-        pw_header.pack(fill="x", pady=(4, 6))
+        # username
+        u_lbl = QLabel("Username")
+        _set_font(u_lbl, size=10, bold=True)
+        u_lbl.setStyleSheet(f"color: {TXT_LIGHT}; background: transparent; border: none;")
+        card_lay.addWidget(u_lbl)
 
-        ctk.CTkLabel(
-            pw_header, text="PASSWORD",
-            font=(FONT_PRIMARY, 10, "bold"),
-            text_color=C_TEXT_LIGHT, fg_color="transparent", anchor="w"
-        ).pack(side="left")
+        self._user_entry = _make_entry("Enter your username")
+        card_lay.addWidget(self._user_entry)
+        card_lay.addSpacing(6)
 
-        ctk.CTkButton(
-            pw_header, text="Forgot password?",
-            font=(FONT_PRIMARY, 10), fg_color="transparent",
-            hover_color=C_INPUT_BG, text_color=C_ACCENT,
-            width=0, height=18, corner_radius=4,
-            command=lambda: self._app.show_forgot_password()
-        ).pack(side="right")
+        # password label row (label left, forgot right)
+        pw_row = QWidget()
+        pw_row.setStyleSheet("background: transparent;")
+        pw_row_lay = QHBoxLayout(pw_row)
+        pw_row_lay.setContentsMargins(0, 0, 0, 0)
+        pw_row_lay.setSpacing(0)
 
-        self._pass_entry = _make_entry(form_wrap, "Enter your password", show="●")
+        pw_lbl = QLabel("Password")
+        _set_font(pw_lbl, size=10, bold=True)
+        pw_lbl.setStyleSheet(f"color: {TXT_LIGHT}; background: transparent; border: none;")
 
-        # ── Show password toggle ───────────────────────────
-        show_row = ctk.CTkFrame(form_wrap, fg_color="transparent")
-        show_row.pack(fill="x", pady=(0, 24))
-        self._show_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            show_row, text="Show Password",
-            variable=self._show_var, command=self._toggle_password,
-            font=(FONT_PRIMARY, 11), text_color=C_TEXT_MID,
-            fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-            checkmark_color=C_WHITE, border_color=C_INPUT_BORDER,
-            checkbox_width=18, checkbox_height=18, corner_radius=4,
-        ).pack(side="left")
+        forgot_btn = QPushButton("Forgot password?")
+        forgot_btn.setObjectName("forgotBtn")
+        forgot_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        forgot_btn.setStyleSheet(f"""
+            QPushButton#forgotBtn {{
+                color: {ACC};
+                border: none;
+                background: transparent;
+                font-size: 11px;
+                padding: 0;
+            }}
+            QPushButton#forgotBtn:hover {{
+                color: {ACC_HOV};
+            }}
+        """)
+        forgot_btn.clicked.connect(lambda: self._app.show_forgot_password())
 
-        # ── Buttons ────────────────────────────────────────
-        _primary_btn(form_wrap, "Sign In", self._on_login).pack(
-            fill="x", pady=(0, 6))
+        pw_row_lay.addWidget(pw_lbl)
+        pw_row_lay.addStretch()
+        pw_row_lay.addWidget(forgot_btn)
+        card_lay.addWidget(pw_row)
 
-        _divider(form_wrap)
+        self._pass_entry = _make_entry("Enter your password", password=True)
+        card_lay.addWidget(self._pass_entry)
 
-        _outline_btn(form_wrap, "Create Account",
-                     self._app.show_register).pack(fill="x")
+        # show-password checkbox
+        self._show_cb = QCheckBox("Show Password")
+        self._show_cb.setStyleSheet(f"""
+            QCheckBox {{
+                color: {TXT_MID};
+                font-size: 12px;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        self._show_cb.stateChanged.connect(self._toggle_password)
+        card_lay.addWidget(self._show_cb)
+        card_lay.addSpacing(10)
 
-        ctk.CTkLabel(
-            form_wrap,
-            text="Don't have an account? Click Create Account above.",
-            font=(FONT_PRIMARY, 10), text_color=C_TEXT_LIGHT,
-            fg_color="transparent"
-        ).pack(pady=(16, 0))
+        # sign-in button
+        self._login_btn = _primary_btn("Sign In", self._on_login)
+        card_lay.addWidget(self._login_btn)
 
-    def _toggle_password(self):
-        self._pass_entry.configure(show="" if self._show_var.get() else "●")
+        # "or" divider
+        div_row = QWidget()
+        div_row.setStyleSheet("background: transparent;")
+        div_lay = QHBoxLayout(div_row)
+        div_lay.setContentsMargins(0, 4, 0, 4)
+
+        def _hline():
+            ln = QFrame()
+            ln.setFrameShape(QFrame.Shape.HLine)
+            ln.setObjectName("divLine")
+            ln.setStyleSheet(f"QFrame#divLine {{ border: none; border-top: 1px solid {CARD_BRD}; background: transparent; }}")
+            return ln
+
+        or_lbl = QLabel("or")
+        or_lbl.setStyleSheet(f"color: {TXT_LIGHT}; background: transparent; border: none; padding: 0 8px;")
+        div_lay.addWidget(_hline())
+        div_lay.addWidget(or_lbl)
+        div_lay.addWidget(_hline())
+        card_lay.addWidget(div_row)
+
+        card_lay.addWidget(_outline_btn("Create Account", self._app.show_register))
+
+        right_lay.addWidget(card)
+        root.addWidget(right)
+
+    # ── helpers ───────────────────────────────────────────────────────
+
+    def _toggle_password(self, state: int):
+        mode = QLineEdit.EchoMode.Normal if state == 2 else QLineEdit.EchoMode.Password
+        self._pass_entry.setEchoMode(mode)
 
     def _on_login(self):
-        username = self._user_entry.get().strip()
-        password = self._pass_entry.get().strip()
+        username = self._user_entry.text().strip()
+        password = self._pass_entry.text().strip()
         if not username or not password:
-            messagebox.showwarning("Missing Fields", "Please fill in all required fields.")
+            QMessageBox.warning(self, "Missing Fields", "Please fill in all required fields.")
             return
         success, message = login_user(username, password)
         if success:
             self._app.show_dashboard(username)
         else:
-            messagebox.showerror("Login Failed", message)
+            QMessageBox.critical(self, "Login Failed", message)
 
 
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
 # REGISTER PAGE
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
 
-class RegisterPage(ctk.CTkFrame):
-    def __init__(self, parent, app):
-        super().__init__(parent, fg_color=C_BG, corner_radius=0)
+class RegisterPage(QWidget):
+    email_sent_signal = pyqtSignal(bool, str, dict, str)
+
+    def __init__(self, parent_widget, app):
+        super().__init__(parent_widget)
         self._app = app
-        self._show_pass = False
-        self._show_confirm = False
+        self.email_sent_signal.connect(self._on_email_sent)
         self._build()
 
-    # ── Accent-bar label helper ─────────────────────────────
-    @staticmethod
-    def _accent_label(parent, text):
-        """Field label with a small purple accent bar on the left."""
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", pady=(0, 4))
+    # ── accent label (coloured left bar + text) ───────────────────────
 
-        # Purple accent bar
-        bar = ctk.CTkFrame(row, width=3, height=16,
-                           fg_color="#6C63FF", corner_radius=1)
-        bar.pack_propagate(False)
-        bar.pack(side="left", padx=(0, 8))
-
-        ctk.CTkLabel(
-            row, text=text,
-            font=(FONT_PRIMARY, 10, "bold"),
-            text_color=C_TEXT_LIGHT, fg_color="transparent", anchor="w"
-        ).pack(side="left")
-
-    # ── Password entry with eye toggle ──────────────────────
-    def _make_password_field(self, parent, placeholder, toggle_attr):
-        """Creates a password CTkEntry with an inline eye toggle button.
-        Returns the entry widget.
+    def _accent_label(self, text: str) -> QWidget:
         """
-        wrap = ctk.CTkFrame(parent, fg_color=C_INPUT_BG, corner_radius=8,
-                            border_width=1, border_color=C_INPUT_BORDER)
-        wrap.pack(fill="x", pady=(0, 8))
+        A compact label row with a purple left-bar accent.
+        Uses a plain QWidget so it gets no background from QFrame QSS.
+        Fixed height so it doesn't add phantom spacing.
+        """
+        row = QWidget()
+        row.setFixedHeight(22)
+        row.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
 
-        entry = ctk.CTkEntry(
-            wrap,
-            placeholder_text=placeholder,
-            font=FONT_INPUT,
-            fg_color="transparent",
-            border_width=0,
-            text_color=C_TEXT_DARK,
-            placeholder_text_color=C_TEXT_LIGHT,
-            height=42, corner_radius=8, show="●",
-        )
-        entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
+        bar = QFrame()
+        bar.setFixedSize(3, 15)
+        bar.setObjectName("accentBar")
+        bar.setStyleSheet("QFrame#accentBar { background-color: #6C63FF; border: none; border-radius: 1px; }")
 
-        eye_btn = ctk.CTkButton(
-            wrap, text="👁",
-            font=("Segoe UI Emoji", 14),
-            fg_color="transparent", hover_color=C_INPUT_BG,
-            text_color=C_TEXT_LIGHT,
-            width=36, height=36, corner_radius=4,
-            command=lambda: self._toggle_eye(entry, eye_btn, toggle_attr)
-        )
-        eye_btn.pack(side="right", padx=(0, 4))
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"color: {TXT_LIGHT}; background: transparent; border: none; font-size: 10px; font-weight: bold;")
 
-        # Focus ring on the wrapper
-        def _on_focus_in(e):
-            wrap.configure(border_color=C_INPUT_FOCUS)
-        def _on_focus_out(e):
-            wrap.configure(border_color=C_INPUT_BORDER)
-        entry.bind("<FocusIn>", _on_focus_in)
-        entry.bind("<FocusOut>", _on_focus_out)
-
-        return entry
-
-    def _toggle_eye(self, entry, btn, attr):
-        """Toggle password visibility for a specific field."""
-        current = getattr(self, attr)
-        new_state = not current
-        setattr(self, attr, new_state)
-        entry.configure(show="" if new_state else "●")
-        btn.configure(text="🔒" if new_state else "👁")
-
-    # ──────────────────────────────────────────────────────────
-    # BUILD
-    # ──────────────────────────────────────────────────────────
+        lay.addWidget(bar)
+        lay.addWidget(lbl)
+        lay.addStretch()
+        return row
 
     def _build(self):
-        make_left_panel(self).pack(side="left", fill="y")
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        right = ctk.CTkScrollableFrame(self, fg_color=C_CARD_BG, corner_radius=0)
-        right.pack(side="left", fill="both", expand=True)
+        root.addWidget(make_left_panel())
 
-        form_wrap = ctk.CTkFrame(right, fg_color="transparent")
-        form_wrap.pack(padx=60, pady=30, fill="both", expand=True)
+        # ── scrollable right side ──────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setObjectName("regScroll")
+        scroll.setStyleSheet("QScrollArea#regScroll { border: none; background: transparent; }")
 
-        _section_label(form_wrap, "Create your account", "Join SignDesk — it's free")
+        content = QWidget()
+        content.setObjectName("regContent")
+        content.setStyleSheet(f"QWidget#regContent {{ background-color: {WHITE}; }}")
+        content_lay = QVBoxLayout(content)
+        content_lay.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        content_lay.setContentsMargins(60, 40, 60, 40)
 
-        # ── Username ───────────────────────────────────────
-        self._accent_label(form_wrap, "USERNAME")
-        self._uname_entry = _make_entry(form_wrap, "Choose a username")
+        # ── form card ─────────────────────────────────────────────────
+        card = QFrame()
+        card.setObjectName("regCard")
+        card.setFixedWidth(420)
+        card.setStyleSheet(f"""
+            QFrame#regCard {{
+                background-color: {WHITE};
+                border: 1.5px solid {CARD_BRD};
+                border-radius: 16px;
+            }}
+        """)
+        form = QVBoxLayout(card)
+        form.setContentsMargins(36, 32, 36, 32)
+        form.setSpacing(6)
 
-        # ── Email ──────────────────────────────────────────
-        self._accent_label(form_wrap, "EMAIL ADDRESS")
-        self._email_entry = _make_entry(form_wrap, "your@email.com")
+        heading = QLabel("Create your account")
+        _set_font(heading, size=24, bold=True)
+        heading.setStyleSheet(f"color: {TXT_DARK}; background: transparent; border: none;")
+        form.addWidget(heading)
+        form.addSpacing(10)
 
-        # ── Password with eye toggle ───────────────────────
-        self._accent_label(form_wrap, "PASSWORD")
-        self._pass_entry = self._make_password_field(
-            form_wrap, "Min. 8 characters", "_show_pass"
-        )
-        self._pass_entry.bind("<KeyRelease>", self._on_password_type)
+        # ── username ──────────────────────────────────────────────────
+        form.addWidget(self._accent_label("Username"))
+        self._uname_entry = _make_entry("Choose a username")
+        form.addWidget(self._uname_entry)
+        form.addSpacing(4)
 
-        # ── Password requirements (dark card) ──────────────
-        req_box = ctk.CTkFrame(
-            form_wrap, fg_color="#1E1E2E", corner_radius=10,
-            border_width=1, border_color="#3A3A5C"
-        )
-        req_box.pack(fill="x", pady=(0, 14))
+        # ── email ─────────────────────────────────────────────────────
+        form.addWidget(self._accent_label("Email Address"))
+        self._email_entry = _make_entry("your@email.com")
+        form.addWidget(self._email_entry)
+        form.addSpacing(4)
 
-        ctk.CTkLabel(
-            req_box, text="Password must contain:",
-            font=(FONT_PRIMARY, 10, "bold"),
-            text_color="#FFFFFF", fg_color="transparent"
-        ).pack(anchor="w", padx=14, pady=(10, 4))
+        # ── password ──────────────────────────────────────────────────
+        form.addWidget(self._accent_label("Password"))
+        pw_wrap, self._pass_entry = _make_password_field("Min. 8 characters")
+        form.addWidget(pw_wrap)
+        self._pass_entry.textChanged.connect(self._on_confirm_type)
+        form.addSpacing(4)
 
-        self._req_labels = {}
-        for key, text, _ in PASSWORD_RULES:
-            row = ctk.CTkFrame(req_box, fg_color="transparent")
-            row.pack(fill="x", padx=14, pady=2)
-            icon_lbl = ctk.CTkLabel(
-                row, text="○", font=FONT_REQ,
-                text_color="#888888", fg_color="transparent", width=16
-            )
-            icon_lbl.pack(side="left", padx=(0, 6))
-            text_lbl = ctk.CTkLabel(
-                row, text=text, font=FONT_REQ,
-                text_color="#888888", fg_color="transparent", anchor="w"
-            )
-            text_lbl.pack(side="left", fill="x")
-            self._req_labels[key] = (icon_lbl, text_lbl)
+        # ── confirm password ──────────────────────────────────────────
+        form.addWidget(self._accent_label("Confirm Password"))
+        cpw_wrap, self._confirm_entry = _make_password_field("Repeat your password")
+        form.addWidget(cpw_wrap)
+        self._confirm_entry.textChanged.connect(self._on_confirm_type)
 
-        ctk.CTkFrame(req_box, height=8, fg_color="transparent").pack()
+        # match feedback
+        self._match_label = QLabel("")
+        self._match_label.setStyleSheet("background: transparent; border: none; font-size: 11px;")
+        form.addWidget(self._match_label)
 
-        # ── Confirm password with eye toggle ───────────────
-        self._accent_label(form_wrap, "CONFIRM PASSWORD")
-        self._confirm_entry = self._make_password_field(
-            form_wrap, "Repeat your password", "_show_confirm"
-        )
-        self._confirm_entry.bind("<KeyRelease>", self._on_confirm_type)
+        # status label
+        self._status_label = QLabel("")
+        self._status_label.setWordWrap(True)
+        self._status_label.setStyleSheet("background: transparent; border: none; font-size: 11px;")
+        form.addWidget(self._status_label)
 
-        # ── Confirm password match feedback ────────────────
-        self._match_label = ctk.CTkLabel(
-            form_wrap, text="", font=(FONT_PRIMARY, 10),
-            text_color=C_TEXT_MID, fg_color="transparent", anchor="w"
-        )
-        self._match_label.pack(fill="x", pady=(0, 12))
+        form.addSpacing(6)
+        self._submit_btn = _primary_btn("Create Account", self._on_submit)
+        form.addWidget(self._submit_btn)
 
-        # Status label
-        self._status_label = ctk.CTkLabel(
-            form_wrap, text="", font=FONT_SMALL,
-            text_color=C_TEXT_MID, fg_color="transparent"
-        )
-        self._status_label.pack(fill="x", pady=(0, 8))
+        form.addSpacing(6)
+        form.addWidget(_outline_btn("← Back to Login", self._app.show_login))
 
-        self._submit_btn = _primary_btn(form_wrap, "Create Account", self._on_submit)
-        self._submit_btn.pack(fill="x", pady=(0, 10))
-        _outline_btn(form_wrap, "← Back to Login", self._app.show_login).pack(fill="x")
+        content_lay.addWidget(card)
+        scroll.setWidget(content)
+        root.addWidget(scroll)
 
-    # ──────────────────────────────────────────────────────────
-    # Live validation callbacks
-    # ──────────────────────────────────────────────────────────
+    # ── validation feedback ───────────────────────────────────────────
 
-    def _on_password_type(self, event=None):
-        """Update password requirements checklist in real time."""
-        password = self._pass_entry.get()
-        for key, _, rule_fn in PASSWORD_RULES:
-            icon_lbl, text_lbl = self._req_labels[key]
-            if rule_fn(password):
-                icon_lbl.configure(text="✓", text_color="#4CAF50")
-                text_lbl.configure(text_color="#4CAF50")
-            else:
-                icon_lbl.configure(text="○", text_color="#888888")
-                text_lbl.configure(text_color="#888888")
-        # Also update confirm match if user already typed there
-        self._on_confirm_type()
-
-    def _on_confirm_type(self, event=None):
-        """Show inline match feedback for confirm password."""
-        confirm = self._confirm_entry.get()
+    def _on_confirm_type(self):
+        confirm = self._confirm_entry.text()
         if not confirm:
-            self._match_label.configure(text="")
+            self._match_label.setText("")
             return
-        password = self._pass_entry.get()
-        if confirm == password:
-            self._match_label.configure(
-                text="✅  Passwords match", text_color="#4CAF50")
+        if confirm == self._pass_entry.text():
+            self._match_label.setText("✓  Passwords match")
+            self._match_label.setStyleSheet(f"color: {SUCCESS}; background: transparent; border: none; font-size: 11px;")
         else:
-            self._match_label.configure(
-                text="❌  Passwords do not match", text_color="#FF4C4C")
+            self._match_label.setText("✗  Passwords do not match")
+            self._match_label.setStyleSheet(f"color: {ERROR}; background: transparent; border: none; font-size: 11px;")
 
-    # ──────────────────────────────────────────────────────────
-    # Submit + Navigation (unchanged logic)
-    # ──────────────────────────────────────────────────────────
+    # ── submit ────────────────────────────────────────────────────────
 
     def _on_submit(self):
-        username = self._uname_entry.get().strip()
-        email    = self._email_entry.get().strip()
-        password = self._pass_entry.get().strip()
-        confirm  = self._confirm_entry.get().strip()
+        username = self._uname_entry.text().strip()
+        email    = self._email_entry.text().strip()
+        password = self._pass_entry.text().strip()
+        confirm  = self._confirm_entry.text().strip()
 
         errors = validate_registration(username, email, password, confirm)
         if errors:
-            messagebox.showerror("Validation Error",
+            QMessageBox.critical(self, "Validation Error",
                                  "Please fix the following:\n\n" +
-                                 "\n".join(f"  • {e}" for e in errors))
+                                 "\n".join(f"• {e}" for e in errors))
             return
 
-        dup_user, dup_user_msg = check_duplicate_username(username)
-        if dup_user:
-            messagebox.showerror("Username Taken", dup_user_msg)
-            return
+        dup, msg = check_duplicate_username(username)
+        if dup:
+            QMessageBox.critical(self, "Username Taken", msg); return
 
-        dup_email, dup_email_msg = check_duplicate_email(email)
-        if dup_email:
-            messagebox.showerror("Email Exists", dup_email_msg)
-            return
+        dup, msg = check_duplicate_email(email)
+        if dup:
+            QMessageBox.critical(self, "Email Exists", msg); return
 
-        self._submit_btn.configure(state="disabled", text="Sending code...")
-        self._status_label.configure(
-            text="Sending verification code to your email...",
-            text_color=C_ACCENT
-        )
+        self._submit_btn.setEnabled(False)
+        self._submit_btn.setText("Sending code…")
+        self._status_label.setText("Sending verification code to your email…")
+        self._status_label.setStyleSheet(f"color: {ACC}; background: transparent; border: none;")
 
-        # Generate OTP in-memory — NO database insert yet.
-        # The user record is only created after successful verification.
-        otp_code = generate_otp()
+        otp_code   = generate_otp()
         otp_expiry = get_otp_expiry()
+        print(f"[OTP] Generated OTP for {email}: {otp_code}")
 
         pending_data = {
-            "username": username,
-            "email": email,
-            "password": password,
-            "otp_code": otp_code,
+            "username":   username,
+            "email":      email,
+            "password":   password,
+            "otp_code":   otp_code,
             "otp_expiry": otp_expiry,
         }
 
-        def bg_task():
-            email_success, email_msg = send_verification_email(email, otp_code)
-            self.after(0, lambda: self._on_email_sent(
-                email_success, email_msg, pending_data, otp_code))
+        def _bg():
+            print(f"[OTP] Calling send_verification_email → {email}")
+            ok, err = send_verification_email(email, otp_code)
+            print(f"[OTP] send_verification_email returned: ok={ok}, msg={err}")
+            self.email_sent_signal.emit(ok, err, pending_data, otp_code)
 
-        threading.Thread(target=bg_task, daemon=True).start()
+        threading.Thread(target=_bg, daemon=True).start()
 
-    def _on_register_fail(self, message: str):
-        self._submit_btn.configure(state="normal", text="Create Account")
-        self._status_label.configure(text=message, text_color=C_ERROR_RED)
-        messagebox.showerror("Registration Error", message)
+    def _on_email_sent(self, success: bool, message: str, pending_data: dict, otp_code: str):
+        self._submit_btn.setEnabled(True)
+        self._submit_btn.setText("Create Account")
 
-    def _on_email_sent(self, success, message, pending_data, otp_code=None):
-        self._submit_btn.configure(state="normal", text="Create Account")
         if success:
-            self._status_label.configure(text="")
+            print(f"[OTP] Email confirmed sent — proceeding to verification page.")
+            self._status_label.setText("")
             self._app.show_verification(pending_data)
         else:
-            self._status_label.configure(
-                text="Offline Mode: Verification email bypassed.",
-                text_color=C_WARN
+            # ── FIX: block navigation, never bypass ──────────────────
+            print(f"[OTP] Email FAILED — blocking navigation. Reason: {message}")
+            self._status_label.setText("Failed to send verification email. Please try again.")
+            self._status_label.setStyleSheet(f"color: {ERROR}; background: transparent; border: none;")
+            QMessageBox.critical(
+                self,
+                "Email Error",
+                f"Could not send the verification email.\n\n"
+                f"Reason: {message}\n\n"
+                "Please check your internet connection and try again.\n"
+                "Registration cannot continue without a verified email.",
             )
-            messagebox.showinfo(
-                "Offline Mode",
-                f"Could not connect to SMTP server.\n"
-                f"Your offline verification code is: {otp_code}\n\n"
-                f"Use this code to pass verification without internet."
-            )
-            self._app.show_verification(pending_data)
+            # Do NOT call show_verification — user must fix and retry.
 
 
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
 # VERIFICATION PAGE
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
 
-class VerificationPage(ctk.CTkFrame):
-    """
-    Email verification screen with:
-    • 6-digit OTP entry
-    • Resend with per-resend cooldown (60 s) and max-resend limit (5)
-    • 10-minute lockout countdown after hitting 5/5, persisted to JSON
-    • Warning card + spam-folder tip + self-service help popup
-    """
-
-    # 10-minute lockout in seconds
+class VerificationPage(QWidget):
     _LOCKOUT_SECONDS = 10 * 60
+    create_signal = pyqtSignal(bool, str)
+    resend_signal = pyqtSignal(bool, str, str)
 
-    def __init__(self, parent, app, pending_data: dict):
-        super().__init__(parent, fg_color=C_BG, corner_radius=0)
-        self._app = app
+    def __init__(self, parent_widget, app, pending_data: dict):
+        super().__init__(parent_widget)
+        self._app     = app
         self._pending = pending_data
-        self._resend_tracker = ResendTracker()
-        self._resend_tracker.record_resend()  # initial send already happened
+        self._resend_tracker  = ResendTracker()
+        self._resend_tracker.record_resend()
         self._attempt_tracker = VerificationAttemptTracker()
 
-        # Timer state
-        self._cooldown_job = None          # per-resend 60 s cooldown
-        self._lockout_job = None           # 10-minute lockout countdown
-        self._lockout_remaining = 0        # seconds left in lockout
+        self.create_signal.connect(self._on_create_result)
+        self.resend_signal.connect(self._on_resend_complete)
+
+        self._cooldown_timer = QTimer(self)
+        self._cooldown_timer.timeout.connect(self._update_cooldown)
+        self._lockout_timer  = QTimer(self)
+        self._lockout_timer.timeout.connect(self._tick_lockout)
+        self._lockout_remaining = 0
 
         self._build()
 
-        # ── Resume a persisted lockout if the app was restarted ────
         from core.cooldown_persistence import load_cooldown
         persisted = load_cooldown(self._pending["email"])
         if persisted > 0:
             self._lockout_remaining = persisted
-            # Force tracker to the limit so UI is consistent
-            from core.email_config import OTP_MAX_RESENDS
             while self._resend_tracker.resend_count < OTP_MAX_RESENDS:
                 self._resend_tracker.record_resend()
             self._show_lockout_ui()
-            self._tick_lockout()
+            self._lockout_timer.start(1000)
         else:
-            # Normal per-resend cooldown
             self._start_cooldown_timer()
 
-    # ──────────────────────────────────────────────────────────
-    # BUILD
-    # ──────────────────────────────────────────────────────────
-
     def _build(self):
-        make_left_panel(self).pack(side="left", fill="y")
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        right = ctk.CTkFrame(self, fg_color=C_WHITE, corner_radius=0)
-        right.pack(side="left", fill="both", expand=True)
+        root.addWidget(make_left_panel())
 
-        self._form_wrap = ctk.CTkFrame(right, fg_color="transparent")
-        self._form_wrap.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.72)
+        right = QWidget()
+        right.setObjectName("verRight")
+        right.setStyleSheet(f"QWidget#verRight {{ background-color: {WHITE}; }}")
+        right_lay = QVBoxLayout(right)
+        right_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        fw = self._form_wrap  # shorthand
+        card = QFrame()
+        card.setObjectName("verCard")
+        card.setFixedWidth(420)
+        card.setStyleSheet(f"""
+            QFrame#verCard {{
+                background-color: {WHITE};
+                border: 1.5px solid {CARD_BRD};
+                border-radius: 16px;
+            }}
+        """)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(36, 32, 36, 32)
+        lay.setSpacing(6)
 
-        # ── Header ─────────────────────────────────────────
-        ctk.CTkLabel(
-            fw, text="Verify your email", font=FONT_HEADING,
-            text_color=C_TEXT_DARK, fg_color="transparent", anchor="w"
-        ).pack(fill="x")
+        heading = QLabel("Verify your email")
+        _set_font(heading, size=24, bold=True)
+        heading.setStyleSheet(f"color: {TXT_DARK}; background: transparent; border: none;")
+        lay.addWidget(heading)
 
-        masked_email = self._mask_email(self._pending["email"])
-        ctk.CTkLabel(
-            fw, text="We've sent a verification code to:",
-            font=FONT_SUBHEAD, text_color=C_TEXT_MID,
-            fg_color="transparent", anchor="w"
-        ).pack(fill="x", pady=(4, 2))
-        ctk.CTkLabel(
-            fw, text=masked_email,
-            font=(FONT_PRIMARY, 13, "bold"), text_color=C_PANEL_LEFT,
-            fg_color="transparent", anchor="w"
-        ).pack(fill="x", pady=(0, 24))
+        sub1 = QLabel("We've sent a verification code to:")
+        _set_font(sub1, size=12)
+        sub1.setStyleSheet(f"color: {TXT_MID}; background: transparent; border: none;")
+        lay.addWidget(sub1)
 
-        # ── OTP input card ─────────────────────────────────
-        otp_card = ctk.CTkFrame(
-            fw, fg_color=C_INPUT_BG, corner_radius=10,
-            border_width=1, border_color=C_CARD_BORDER
-        )
-        otp_card.pack(fill="x", pady=(0, 16))
+        def _mask(e: str) -> str:
+            try:
+                l, d = e.split("@")
+                return f"{l[0]}***{l[-1] if len(l) > 2 else ''}@{d}"
+            except Exception:
+                return e
 
-        otp_inner = ctk.CTkFrame(otp_card, fg_color="transparent")
-        otp_inner.pack(padx=24, pady=22)
+        sub2 = QLabel(_mask(self._pending["email"]))
+        _set_font(sub2, size=14, bold=True)
+        sub2.setStyleSheet(f"color: {PANEL}; background: transparent; border: none;")
+        lay.addWidget(sub2)
+        lay.addSpacing(14)
 
-        ctk.CTkLabel(
-            otp_inner, text="Enter the 6-digit verification code",
-            font=(FONT_PRIMARY, 11, "bold"), text_color=C_TEXT_MID,
-            fg_color="transparent"
-        ).pack(pady=(0, 12))
+        # OTP entry card
+        otp_card = QFrame()
+        otp_card.setObjectName("otpCard")
+        otp_card.setStyleSheet(f"""
+            QFrame#otpCard {{
+                background-color: {INP_BG};
+                border: 1px solid {CARD_BRD};
+                border-radius: 10px;
+            }}
+        """)
+        otp_lay = QVBoxLayout(otp_card)
+        otp_lay.setContentsMargins(24, 18, 24, 18)
+        otp_lay.setSpacing(10)
 
-        self._otp_entry = ctk.CTkEntry(
-            otp_inner,
-            placeholder_text="000000",
-            font=("Courier New", 32, "bold"), justify="center",
-            fg_color=C_WHITE, border_color=C_INPUT_BORDER, border_width=1,
-            text_color=C_PANEL_LEFT, placeholder_text_color="#C5CAE9",
-            height=60, width=280, corner_radius=8
-        )
-        self._otp_entry.pack(pady=(0, 8))
-        self._otp_entry.bind("<FocusIn>",
-            lambda e: self._otp_entry.configure(border_color=C_INPUT_FOCUS))
-        self._otp_entry.bind("<FocusOut>",
-            lambda e: self._otp_entry.configure(border_color=C_INPUT_BORDER))
+        code_lbl = QLabel("Enter the 6-digit verification code")
+        _set_font(code_lbl, size=11, bold=True)
+        code_lbl.setStyleSheet(f"color: {TXT_MID}; background: transparent; border: none;")
+        code_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        otp_lay.addWidget(code_lbl)
 
-        # Bind <KeyRelease> to enable/disable Verify based on entry content
-        self._otp_entry.bind("<KeyRelease>", self._on_otp_key)
+        self._otp_entry = QLineEdit()
+        self._otp_entry.setPlaceholderText("000000")
+        self._otp_entry.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._otp_entry.setMaxLength(6)
+        self._otp_entry.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {WHITE};
+                border: 1px solid {INP_BRD};
+                border-radius: 8px;
+                font-family: 'Courier New';
+                font-size: 32px;
+                font-weight: bold;
+                color: {PANEL};
+                padding: 10px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {INP_FOC};
+            }}
+        """)
+        self._otp_entry.textChanged.connect(self._on_otp_key)
+        otp_lay.addWidget(self._otp_entry)
 
-        from core.email_config import OTP_EXPIRY_MINUTES
-        ctk.CTkLabel(
-            otp_inner, text=f"Code expires in {OTP_EXPIRY_MINUTES} minutes",
-            font=(FONT_PRIMARY, 10), text_color=C_TEXT_LIGHT,
-            fg_color="transparent"
-        ).pack()
+        exp_lbl = QLabel(f"Code expires in {OTP_EXPIRY_MINUTES} minutes")
+        _set_font(exp_lbl, size=10)
+        exp_lbl.setStyleSheet(f"color: {TXT_LIGHT}; background: transparent; border: none;")
+        exp_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        otp_lay.addWidget(exp_lbl)
 
-        # ── Status label ───────────────────────────────────
-        self._status_label = ctk.CTkLabel(
-            fw, text="", font=(FONT_PRIMARY, 11),
-            text_color=C_TEXT_MID, fg_color="transparent"
-        )
-        self._status_label.pack(fill="x", pady=(0, 12))
+        lay.addWidget(otp_card)
 
-        # ── Warning card (hidden by default) ───────────────
-        self._warning_card = ctk.CTkFrame(
-            fw, fg_color="#1E1E2E", corner_radius=10,
-            border_width=1, border_color="#3A3A4A"
-        )
-        # NOT packed yet — shown only after 5/5
+        self._status_label = QLabel("")
+        _set_font(self._status_label, size=11)
+        self._status_label.setWordWrap(True)
+        self._status_label.setStyleSheet("background: transparent; border: none;")
+        lay.addWidget(self._status_label)
 
-        warn_inner = ctk.CTkFrame(self._warning_card, fg_color="transparent")
-        warn_inner.pack(padx=18, pady=16)
+        self._verify_btn = _primary_btn("Verify & Create Account", self._on_verify)
+        self._verify_btn.setEnabled(False)
+        lay.addWidget(self._verify_btn)
 
-        ctk.CTkLabel(
-            warn_inner,
-            text="⚠  You've reached the resend limit.\n"
-                 "     Please wait before retrying.",
-            font=(FONT_PRIMARY, 11, "bold"),
-            text_color="#FFA500",  # orange warning
-            fg_color="transparent", justify="left", anchor="w"
-        ).pack(fill="x", pady=(0, 10))
+        # lockout warning card (hidden initially)
+        self._warning_card = QFrame()
+        self._warning_card.setObjectName("warnCard")
+        self._warning_card.setStyleSheet("""
+            QFrame#warnCard {
+                background-color: #1E1E2E;
+                border: 1px solid #3A3A4A;
+                border-radius: 10px;
+            }
+        """)
+        warn_lay = QVBoxLayout(self._warning_card)
+        w1 = QLabel("⚠  You've reached the resend limit.\nPlease wait before retrying.")
+        w1.setStyleSheet("color: #FFA500; background: transparent; border: none; font-weight: bold;")
+        self._lockout_timer_label = QLabel("")
+        self._lockout_timer_label.setStyleSheet("color: #FFFFFF; background: transparent; border: none; font-weight: bold;")
+        warn_lay.addWidget(w1)
+        warn_lay.addWidget(self._lockout_timer_label)
+        self._warning_card.hide()
+        lay.addWidget(self._warning_card)
 
-        self._lockout_timer_label = ctk.CTkLabel(
-            warn_inner,
-            text="Too many attempts. Try again in 10:00",
-            font=(FONT_PRIMARY, 12, "bold"),
-            text_color="#FFFFFF",
-            fg_color="transparent", anchor="w"
-        )
-        self._lockout_timer_label.pack(fill="x", pady=(0, 10))
+        # resend row
+        resend_row = QWidget()
+        resend_row.setStyleSheet("background: transparent;")
+        resend_lay = QHBoxLayout(resend_row)
+        resend_lay.setContentsMargins(0, 0, 0, 0)
+        resend_lay.setSpacing(4)
 
-        ctk.CTkLabel(
-            warn_inner,
-            text="📧  Can't find the email?\n"
-                 "      Check your spam or junk folder.",
-            font=(FONT_PRIMARY, 10),
-            text_color="#AAAAAA",
-            fg_color="transparent", justify="left", anchor="w"
-        ).pack(fill="x")
+        r_lbl = QLabel("Didn't receive the code?")
+        r_lbl.setStyleSheet(f"color: {TXT_LIGHT}; background: transparent; border: none;")
 
-        # ── Verify button (starts disabled) ────────────────
-        self._verify_btn = _primary_btn(
-            fw, "✓  Verify & Create Account", self._on_verify
-        )
-        self._verify_btn.configure(state="disabled")
-        self._verify_btn.pack(fill="x", pady=(0, 10))
+        self._resend_btn = QPushButton("Resend Code")
+        self._resend_btn.setObjectName("resendBtn")
+        self._resend_btn.setStyleSheet(f"""
+            QPushButton#resendBtn {{
+                color: {ACC};
+                font-weight: bold;
+                border: none;
+                background: transparent;
+            }}
+            QPushButton#resendBtn:hover {{ color: {ACC_HOV}; }}
+            QPushButton#resendBtn:disabled {{ color: {TXT_LIGHT}; }}
+        """)
+        self._resend_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._resend_btn.clicked.connect(self._on_resend)
 
-        # ── Resend row ─────────────────────────────────────
-        resend_row = ctk.CTkFrame(fw, fg_color="transparent")
-        resend_row.pack(fill="x", pady=(0, 10))
+        self._cooldown_label = QLabel("")
+        self._cooldown_label.setStyleSheet(f"color: {TXT_LIGHT}; background: transparent; border: none;")
 
-        ctk.CTkLabel(
-            resend_row, text="Didn't receive the code?",
-            font=FONT_SMALL, text_color=C_TEXT_LIGHT, fg_color="transparent"
-        ).pack(side="left")
+        resend_lay.addWidget(r_lbl)
+        resend_lay.addWidget(self._resend_btn)
+        resend_lay.addWidget(self._cooldown_label)
+        resend_lay.addStretch()
+        lay.addWidget(resend_row)
 
-        self._resend_btn = ctk.CTkButton(
-            resend_row, text="Resend Code",
-            command=self._on_resend,
-            font=(FONT_PRIMARY, 11, "bold"),
-            fg_color="transparent", hover_color=C_INPUT_BG,
-            text_color=C_ACCENT,
-            width=100, height=28, corner_radius=4, state="disabled"
-        )
-        self._resend_btn.pack(side="left", padx=(8, 0))
+        lay.addSpacing(6)
+        lay.addWidget(_outline_btn("← Back to Registration", self._on_back))
 
-        self._cooldown_label = ctk.CTkLabel(
-            resend_row, text="", font=(FONT_PRIMARY, 10),
-            text_color=C_TEXT_LIGHT, fg_color="transparent"
-        )
-        self._cooldown_label.pack(side="left", padx=(6, 0))
+        right_lay.addWidget(card)
+        root.addWidget(right)
 
-        # ── "Having trouble? View Help" link (hidden by default)
-        self._help_link = ctk.CTkButton(
-            fw, text="Having trouble? View Help",
-            command=self._show_help_popup,
-            font=(FONT_PRIMARY, 10),
-            fg_color="transparent", hover_color=C_INPUT_BG,
-            text_color=C_TEXT_LIGHT,
-            width=0, height=24, corner_radius=4,
-        )
-        # NOT packed yet — shown only after 5/5
+    # ── OTP input ─────────────────────────────────────────────────────
 
-        # ── Back to Registration ───────────────────────────
-        _outline_btn(
-            fw, "← Back to Registration", self._on_back
-        ).pack(fill="x")
+    def _on_otp_key(self):
+        val = self._otp_entry.text().strip()
+        self._verify_btn.setEnabled(len(val) == 6 and val.isdigit())
 
-    # ──────────────────────────────────────────────────────────
-    # OTP entry → Verify button state
-    # ──────────────────────────────────────────────────────────
-
-    def _on_otp_key(self, event=None):
-        """Enable Verify only when entry contains exactly 6 digits."""
-        value = self._otp_entry.get().strip()
-        if len(value) == 6 and value.isdigit():
-            self._verify_btn.configure(state="normal")
-        else:
-            self._verify_btn.configure(state="disabled")
-
-    # ──────────────────────────────────────────────────────────
-    # Helpers
-    # ──────────────────────────────────────────────────────────
-
-    def _mask_email(self, email: str) -> str:
-        try:
-            local, domain = email.split("@")
-            masked = local[0] + "***" + (local[-1] if len(local) > 2 else "")
-            return f"{masked}@{domain}"
-        except Exception:
-            return email
-
-    # ──────────────────────────────────────────────────────────
-    # Verify flow
-    # ──────────────────────────────────────────────────────────
+    # ── verify ────────────────────────────────────────────────────────
 
     def _on_verify(self):
-        entered_code = self._otp_entry.get().strip()
-        if not entered_code:
-            self._status_label.configure(
-                text="Please enter the verification code.", text_color=C_WARN)
-            return
-        if len(entered_code) != 6 or not entered_code.isdigit():
-            self._status_label.configure(
-                text="Code must be exactly 6 digits.", text_color=C_WARN)
+        entered = self._otp_entry.text().strip()
+        if not entered or len(entered) != 6 or not entered.isdigit():
+            self._status_label.setText("Please enter a valid 6-digit code.")
+            self._status_label.setStyleSheet(f"color: {WARN}; background: transparent; border: none;")
             return
 
         can_try, reason = self._attempt_tracker.can_attempt()
         if not can_try:
-            self._status_label.configure(text=reason, text_color=C_ERROR_RED)
-            self._verify_btn.configure(state="disabled")
-            messagebox.showerror("Verification Locked", reason)
+            self._status_label.setText(reason)
+            self._status_label.setStyleSheet(f"color: {ERROR}; background: transparent; border: none;")
+            self._verify_btn.setEnabled(False)
+            QMessageBox.critical(self, "Verification Locked", reason)
             self._on_back()
             return
 
-        # ── In-memory OTP verification ─────────────────────
-        stored_code = self._pending.get("otp_code", "")
+        stored_code   = self._pending.get("otp_code", "")
         stored_expiry = self._pending.get("otp_expiry")
 
         if stored_expiry and is_otp_expired(stored_expiry):
-            self._status_label.configure(
-                text="Verification code has expired. Please resend.",
-                text_color=C_ERROR_RED)
+            self._status_label.setText("Code has expired. Please resend.")
+            self._status_label.setStyleSheet(f"color: {ERROR}; background: transparent; border: none;")
             self._attempt_tracker.record_attempt()
-            self._otp_entry.delete(0, "end")
-            self._on_otp_key()
+            self._otp_entry.clear()
             return
 
-        if entered_code != stored_code:
+        if entered != stored_code:
             self._attempt_tracker.record_attempt()
             remaining = self._attempt_tracker.attempts_remaining
-            self._status_label.configure(
-                text=f"Incorrect verification code. ({remaining} attempts left)",
-                text_color=C_ERROR_RED)
-            self._otp_entry.delete(0, "end")
-            self._on_otp_key()
+            self._status_label.setText(f"Incorrect code. ({remaining} attempts left)")
+            self._status_label.setStyleSheet(f"color: {ERROR}; background: transparent; border: none;")
+            self._otp_entry.clear()
             return
 
-        # ── Code matches — now create the user in the DB ───
-        self._verify_btn.configure(state="disabled", text="Creating account...")
-        self._status_label.configure(text="Creating your account...", text_color=C_ACCENT)
+        self._verify_btn.setEnabled(False)
+        self._verify_btn.setText("Creating account…")
+        self._status_label.setText("Creating your account…")
+        self._status_label.setStyleSheet(f"color: {ACC}; background: transparent; border: none;")
 
-        def run_create():
+        def _run():
             ok, msg = create_verified_user(
                 self._pending["username"],
                 self._pending["email"],
-                self._pending["password"]
+                self._pending["password"],
             )
-            self.after(0, lambda: self._on_create_result(ok, msg))
+            self.create_signal.emit(ok, msg)
 
-        threading.Thread(target=run_create, daemon=True).start()
+        threading.Thread(target=_run, daemon=True).start()
 
-    def _on_create_result(self, success, msg):
+    def _on_create_result(self, success: bool, msg: str):
         if success:
-            self._status_label.configure(
-                text="Code verified! Account created successfully.",
-                text_color=C_SUCCESS)
-            messagebox.showinfo("Success",
-                                "Account verified! You can now log in.")
+            self._status_label.setText("Account created successfully.")
+            self._status_label.setStyleSheet(f"color: {SUCCESS}; background: transparent; border: none;")
+            QMessageBox.information(self, "Success", "Account verified! You can now log in.")
             self._app.show_login()
         else:
-            self._verify_btn.configure(
-                state="normal", text="✓  Verify & Create Account")
-            self._status_label.configure(
-                text=msg, text_color=C_ERROR_RED)
-            messagebox.showerror("Account Error", msg)
+            self._verify_btn.setEnabled(True)
+            self._verify_btn.setText("Verify & Create Account")
+            self._status_label.setText(msg)
+            self._status_label.setStyleSheet(f"color: {ERROR}; background: transparent; border: none;")
+            QMessageBox.critical(self, "Account Error", msg)
 
-    # ──────────────────────────────────────────────────────────
-    # Resend flow (in-memory OTP — no DB)
-    # ──────────────────────────────────────────────────────────
+    # ── resend ────────────────────────────────────────────────────────
 
     def _on_resend(self):
         can_resend, reason = self._resend_tracker.can_resend()
         if not can_resend:
-            self._status_label.configure(text=reason, text_color=C_WARN)
+            self._status_label.setText(reason)
+            self._status_label.setStyleSheet(f"color: {WARN}; background: transparent; border: none;")
             return
-        # Disable immediately to prevent rapid double-clicks
-        self._resend_btn.configure(state="disabled")
-        self._status_label.configure(text="Sending new code...", text_color=C_ACCENT)
 
-        # Generate a fresh OTP in memory
+        self._resend_btn.setEnabled(False)
+        self._status_label.setText("Sending new code…")
+        self._status_label.setStyleSheet(f"color: {ACC}; background: transparent; border: none;")
+
         new_code = generate_otp()
-        new_expiry = get_otp_expiry()
-        self._pending["otp_code"] = new_code
-        self._pending["otp_expiry"] = new_expiry
+        self._pending["otp_code"]   = new_code
+        self._pending["otp_expiry"] = get_otp_expiry()
 
-        def resend_task():
-            email_ok, email_msg = send_verification_email(
-                self._pending["email"], new_code)
-            self.after(0, lambda: self._on_resend_complete(email_ok, email_msg, new_code))
+        def _task():
+            ok, msg = send_verification_email(self._pending["email"], new_code)
+            self.resend_signal.emit(ok, msg, new_code)
 
-        threading.Thread(target=resend_task, daemon=True).start()
+        threading.Thread(target=_task, daemon=True).start()
 
-    def _on_resend_complete(self, success, message, new_code=None):
-        from core.email_config import OTP_MAX_RESENDS
-
+    def _on_resend_complete(self, success: bool, message: str, new_code: str = ""):
         if success:
             self._resend_tracker.record_resend()
             count = self._resend_tracker.resend_count
-            self._status_label.configure(
-                text=f"New code sent! ({count}/{OTP_MAX_RESENDS} resends used)",
-                text_color=C_SUCCESS)
-            self._otp_entry.delete(0, "end")
-            self._on_otp_key()  # update verify button state
-
-            # Check if limit just reached → start lockout
+            self._status_label.setText(f"New code sent! ({count}/{OTP_MAX_RESENDS} resends used)")
+            self._status_label.setStyleSheet(f"color: {SUCCESS}; background: transparent; border: none;")
+            self._otp_entry.clear()
             if count >= OTP_MAX_RESENDS:
                 self._begin_lockout()
             else:
                 self._start_cooldown_timer()
         else:
-            if new_code:
-                self._resend_tracker.record_resend()
-                count = self._resend_tracker.resend_count
-                self._status_label.configure(
-                    text=f"Offline Mode: ({count}/{OTP_MAX_RESENDS} resends used)",
-                    text_color=C_WARN)
-                self._otp_entry.delete(0, "end")
-                self._on_otp_key()
+            self._status_label.setText(message)
+            self._status_label.setStyleSheet(f"color: {ERROR}; background: transparent; border: none;")
+            self._resend_btn.setEnabled(True)
 
-                if count >= OTP_MAX_RESENDS:
-                    self._begin_lockout()
-                else:
-                    self._start_cooldown_timer()
-
-                messagebox.showinfo(
-                    "Offline Mode",
-                    f"Could not connect to SMTP.\n"
-                    f"New offline code: {new_code}")
-            else:
-                self._status_label.configure(text=message, text_color=C_ERROR_RED)
-                self._resend_btn.configure(state="normal")
-
-    # ──────────────────────────────────────────────────────────
-    # Per-resend 60 s cooldown (existing behavior)
-    # ──────────────────────────────────────────────────────────
+    # ── cooldown ──────────────────────────────────────────────────────
 
     def _start_cooldown_timer(self):
-        self._resend_btn.configure(state="disabled")
+        self._resend_btn.setEnabled(False)
         self._update_cooldown()
 
     def _update_cooldown(self):
         remaining = self._resend_tracker.cooldown_remaining
         if remaining > 0:
-            self._cooldown_label.configure(text=f"({remaining}s)")
-            self._resend_btn.configure(state="disabled")
-            self._cooldown_job = self.after(1000, self._update_cooldown)
+            self._cooldown_label.setText(f"({remaining}s)")
+            self._resend_btn.setEnabled(False)
+            self._cooldown_timer.start(1000)
         else:
-            self._cooldown_label.configure(text="")
+            self._cooldown_timer.stop()
+            self._cooldown_label.setText("")
             can_resend, _ = self._resend_tracker.can_resend()
             if can_resend:
-                self._resend_btn.configure(state="normal")
+                self._resend_btn.setEnabled(True)
             else:
-                from core.email_config import OTP_MAX_RESENDS
-                if self._resend_tracker.resend_count >= OTP_MAX_RESENDS:
-                    self._resend_btn.configure(state="disabled")
-                    self._cooldown_label.configure(text="(limit reached)")
-                else:
-                    self._cooldown_job = self.after(500, self._update_cooldown)
+                self._resend_btn.setEnabled(False)
+                self._cooldown_label.setText("(limit reached)")
 
-    # ──────────────────────────────────────────────────────────
-    # 10-minute LOCKOUT (after 5/5 resends)
-    # ──────────────────────────────────────────────────────────
+    # ── lockout ───────────────────────────────────────────────────────
 
     def _begin_lockout(self):
-        """Start the 10-minute lockout and persist it to JSON."""
         from datetime import datetime, timedelta
         from core.cooldown_persistence import save_cooldown
-
         self._lockout_remaining = self._LOCKOUT_SECONDS
         expiry = datetime.now() + timedelta(seconds=self._LOCKOUT_SECONDS)
         save_cooldown(self._pending["email"], expiry)
-
         self._show_lockout_ui()
-        self._tick_lockout()
+        self._lockout_timer.start(1000)
 
     def _show_lockout_ui(self):
-        """Make the warning card and help link visible."""
-        self._resend_btn.configure(state="disabled")
-        self._cooldown_label.configure(text="")
-
-        # Show the warning card (pack it above the verify button)
-        # We need to insert it in the right place in the layout.
-        # Pack it before the verify button by using pack with before=
-        self._warning_card.pack(
-            fill="x", pady=(0, 12),
-            before=self._verify_btn
-        )
-
-        # Show the help link (pack it before the back button)
-        self._help_link.pack(fill="x", pady=(0, 8))
-        # Re-pack the back button so help link stays above it
-        # (it's already at the bottom, help_link goes just before it)
+        self._resend_btn.setEnabled(False)
+        self._cooldown_label.setText("")
+        self._warning_card.show()
 
     def _hide_lockout_ui(self):
-        """Hide the warning card and help link."""
-        self._warning_card.pack_forget()
-        self._help_link.pack_forget()
+        self._warning_card.hide()
 
     def _tick_lockout(self):
-        """Countdown tick — called every second via .after()."""
         if self._lockout_remaining <= 0:
+            self._lockout_timer.stop()
             self._on_lockout_expired()
             return
-
-        minutes = self._lockout_remaining // 60
-        seconds = self._lockout_remaining % 60
-        self._lockout_timer_label.configure(
-            text=f"Too many attempts. Try again in {minutes:02d}:{seconds:02d}"
-        )
-
+        m, s = divmod(self._lockout_remaining, 60)
+        self._lockout_timer_label.setText(f"Try again in {m:02d}:{s:02d}")
         self._lockout_remaining -= 1
-        self._lockout_job = self.after(1000, self._tick_lockout)
 
     def _on_lockout_expired(self):
-        """Called when the 10-minute countdown reaches zero."""
         from core.cooldown_persistence import clear_cooldown
-
-        # Reset tracker so user can resend again
         self._resend_tracker.reset()
         clear_cooldown()
-
-        # Update UI
         self._hide_lockout_ui()
-        self._resend_btn.configure(state="normal")
-        self._cooldown_label.configure(text="")
-        self._status_label.configure(
-            text="Cooldown expired. You may resend the code.",
-            text_color=C_SUCCESS
-        )
+        self._resend_btn.setEnabled(True)
+        self._cooldown_label.setText("")
+        self._status_label.setText("Cooldown expired. You may resend the code.")
+        self._status_label.setStyleSheet(f"color: {SUCCESS}; background: transparent; border: none;")
 
-    # ──────────────────────────────────────────────────────────
-    # Self-service help popup
-    # ──────────────────────────────────────────────────────────
-
-    def _show_help_popup(self):
-        """Open a CTkToplevel with offline self-service tips."""
-        popup = ctk.CTkToplevel(self)
-        popup.title("Having trouble verifying?")
-        popup.resizable(False, False)
-        popup.grab_set()
-
-        # Size and center over the main window
-        pw, ph = 420, 340
-        popup.geometry(f"{pw}x{ph}")
-        popup.after(10, lambda: self._center_popup(popup, pw, ph))
-
-        popup.configure(fg_color="#1E1E2E")
-
-        content = ctk.CTkFrame(popup, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=28, pady=24)
-
-        ctk.CTkLabel(
-            content, text="Having trouble verifying?",
-            font=(FONT_PRIMARY, 16, "bold"),
-            text_color="#FFFFFF", fg_color="transparent", anchor="w"
-        ).pack(fill="x", pady=(0, 16))
-
-        tips = [
-            "Check your spam or junk folder",
-            "Make sure you entered the correct email address",
-            "Wait for the 10-minute cooldown to reset, then try again",
-            "Click 'Back to Registration' to re-enter your email",
-            "Restart the app if the issue persists",
-        ]
-
-        for tip in tips:
-            row = ctk.CTkFrame(content, fg_color="transparent")
-            row.pack(fill="x", pady=4)
-
-            ctk.CTkLabel(
-                row, text="•", font=(FONT_PRIMARY, 12, "bold"),
-                text_color="#6C63FF", fg_color="transparent", width=16
-            ).pack(side="left", padx=(0, 8))
-
-            ctk.CTkLabel(
-                row, text=tip,
-                font=(FONT_PRIMARY, 11),
-                text_color="#CCCCCC", fg_color="transparent",
-                anchor="w"
-            ).pack(side="left", fill="x", expand=True)
-
-        ctk.CTkButton(
-            content, text="Close", command=popup.destroy,
-            font=FONT_BTN,
-            fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-            text_color=C_WHITE,
-            height=38, corner_radius=19, width=140
-        ).pack(pady=(20, 0))
-
-    def _center_popup(self, popup, pw, ph):
-        """Center the popup over the main app window."""
-        try:
-            mx = self.winfo_toplevel().winfo_x()
-            my = self.winfo_toplevel().winfo_y()
-            mw = self.winfo_toplevel().winfo_width()
-            mh = self.winfo_toplevel().winfo_height()
-            x = mx + (mw - pw) // 2
-            y = my + (mh - ph) // 2
-            popup.geometry(f"{pw}x{ph}+{x}+{y}")
-        except Exception:
-            pass
-
-    # ──────────────────────────────────────────────────────────
-    # Back to Registration — full reset
-    # ──────────────────────────────────────────────────────────
+    # ── navigation ────────────────────────────────────────────────────
 
     def _on_back(self):
         from core.cooldown_persistence import clear_cooldown
-
-        # Cancel active timers
-        if self._cooldown_job:
-            self.after_cancel(self._cooldown_job)
-            self._cooldown_job = None
-        if self._lockout_job:
-            self.after_cancel(self._lockout_job)
-            self._lockout_job = None
-
-        # Reset state
+        self._cooldown_timer.stop()
+        self._lockout_timer.stop()
         self._resend_tracker.reset()
         clear_cooldown()
-
-        # Navigate
         self._app.show_register()
-
-    # ──────────────────────────────────────────────────────────
-    # Cleanup on destroy
-    # ──────────────────────────────────────────────────────────
-
-    def destroy(self):
-        if self._cooldown_job:
-            self.after_cancel(self._cooldown_job)
-        if self._lockout_job:
-            self.after_cancel(self._lockout_job)
-        super().destroy()

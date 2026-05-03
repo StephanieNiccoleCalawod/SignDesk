@@ -1,342 +1,294 @@
 """
 reset_password_window.py - Reset Password UI
 Step 3 of the password reset flow: new password entry with strength indicator.
-Matches the existing RegisterPage password section style.
+PyQt6 implementation.
 """
 
-import customtkinter as ctk
+import re
 import threading
-from tkinter import messagebox
+from PyQt6.QtWidgets import (
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
+    QPushButton, QFrame, QScrollArea, QProgressBar, QMessageBox
+)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QCursor
 
 from core.theme import *
-from core.ui_helpers import make_left_panel
+from modules.auth.ui import make_left_panel, _primary_btn, _set_font
 from modules.auth.service import validate_password
 from modules.auth.otp_manager import update_password
 
 
-# ── Shared helpers (same as auth/ui.py) ─────────────────────
-
-def _primary_btn(parent, text, command):
-    return ctk.CTkButton(
-        parent, text=text, command=command,
-        font=FONT_BTN,
-        fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-        text_color=C_WHITE,
-        height=42, corner_radius=21
-    )
+PASSWORD_RULES = [
+    ("length",    "At least 8 characters",              lambda p: len(p) >= 8),
+    ("upper",     "At least 1 uppercase letter (A-Z)",  lambda p: bool(re.search(r"[A-Z]", p))),
+    ("lower",     "At least 1 lowercase letter (a-z)",  lambda p: bool(re.search(r"[a-z]", p))),
+    ("digit",     "At least 1 number (0-9)",            lambda p: bool(re.search(r"[0-9]", p))),
+    ("special",   "At least 1 special character",       lambda p: bool(re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?]", p))),
+]
 
 
-def _outline_btn(parent, text, command):
-    return ctk.CTkButton(
-        parent, text=text, command=command,
-        font=FONT_BTN,
-        fg_color=C_WHITE, hover_color=C_INPUT_BG,
-        text_color=C_TEXT_DARK,
-        border_width=1, border_color=C_CARD_BORDER,
-        height=42, corner_radius=21
-    )
+class ResetPasswordPage(QWidget):
+    update_signal = pyqtSignal(bool, str)
 
-
-# ──────────────────────────────────────────────────────────────
-# RESET PASSWORD PAGE
-# ──────────────────────────────────────────────────────────────
-
-class ResetPasswordPage(ctk.CTkFrame):
-    def __init__(self, parent, app, email: str):
-        super().__init__(parent, fg_color=C_BG, corner_radius=0)
+    def __init__(self, parent_widget, app, email: str):
+        super().__init__(parent_widget)
         self._app = app
         self._email = email
+        self.update_signal.connect(self._on_result)
         self._build()
 
+    def _make_password_field(self, placeholder):
+        wrap = QFrame()
+        wrap.setStyleSheet(
+            f"background-color: {C_INPUT_BG}; border: 1px solid {C_INPUT_BORDER}; border-radius: 8px;"
+        )
+        layout = QHBoxLayout(wrap)
+        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setSpacing(0)
+
+        entry = QLineEdit()
+        entry.setPlaceholderText(placeholder)
+        entry.setEchoMode(QLineEdit.EchoMode.Password)
+        entry.setStyleSheet("border: none; background: transparent; font-size: 14px; padding: 0 6px;")
+        entry.setFixedHeight(40)
+
+        toggle_btn = QPushButton("Show")
+        toggle_btn.setFixedSize(48, 32)
+        toggle_btn.setStyleSheet(
+            f"border: none; background: transparent; color: {C_TEXT_LIGHT}; font-size: 11px; font-weight: bold;"
+        )
+        toggle_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+        def toggle():
+            if entry.echoMode() == QLineEdit.EchoMode.Password:
+                entry.setEchoMode(QLineEdit.EchoMode.Normal)
+                toggle_btn.setText("Hide")
+            else:
+                entry.setEchoMode(QLineEdit.EchoMode.Password)
+                toggle_btn.setText("Show")
+
+        toggle_btn.clicked.connect(toggle)
+        layout.addWidget(entry)
+        layout.addWidget(toggle_btn)
+        return wrap, entry
+
     def _build(self):
-        # ── Left brand panel ───────────────────────────────
-        make_left_panel(self).pack(side="left", fill="y")
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # ── Right content area ─────────────────────────────
-        right = ctk.CTkScrollableFrame(self, fg_color=C_WHITE, corner_radius=0)
-        right.pack(side="left", fill="both", expand=True)
+        main_layout.addWidget(make_left_panel())
 
-        form_wrap = ctk.CTkFrame(right, fg_color="transparent")
-        form_wrap.pack(padx=60, pady=40, fill="both", expand=True)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none; background-color: white;")
 
-        # ── Heading ────────────────────────────────────────
-        ctk.CTkLabel(
-            form_wrap, text="Create new password",
-            font=(FONT_PRIMARY, 24, "bold"),
-            text_color=C_TEXT_DARK, fg_color="transparent", anchor="w"
-        ).pack(fill="x")
-        ctk.CTkLabel(
-            form_wrap,
-            text="Your new password must meet the requirements below",
-            font=(FONT_PRIMARY, 12),
-            text_color=C_TEXT_MID, fg_color="transparent", anchor="w"
-        ).pack(fill="x", pady=(4, 28))
+        content = QWidget()
+        content.setStyleSheet(f"background-color: {C_WHITE};")
+        content_layout = QVBoxLayout(content)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        content_layout.setContentsMargins(60, 40, 60, 40)
 
-        # ── New password field with show/hide ──────────────
-        ctk.CTkLabel(
-            form_wrap, text="NEW PASSWORD",
-            font=(FONT_PRIMARY, 10, "bold"),
-            text_color=C_TEXT_LIGHT, fg_color="transparent", anchor="w"
-        ).pack(fill="x", pady=(0, 6))
+        form_wrap = QFrame()
+        form_wrap.setFixedWidth(400)
+        form_wrap.setStyleSheet("background: transparent;")
+        form_layout = QVBoxLayout(form_wrap)
+        form_layout.setSpacing(6)
 
-        pw_frame = ctk.CTkFrame(form_wrap, fg_color="transparent")
-        pw_frame.pack(fill="x", pady=(0, 8))
+        heading = QLabel("Create new password")
+        _set_font(heading, size=24, bold=True)
+        heading.setStyleSheet(f"color: {C_TEXT_DARK};")
+        form_layout.addWidget(heading)
 
-        self._pass_entry = ctk.CTkEntry(
-            pw_frame,
-            placeholder_text="Min. 8 characters",
-            font=FONT_INPUT,
-            fg_color=C_INPUT_BG,
-            border_color=C_INPUT_BORDER, border_width=1,
-            text_color=C_TEXT_DARK,
-            placeholder_text_color=C_TEXT_LIGHT,
-            height=42, corner_radius=8, show="●",
+        sub = QLabel("Your new password must meet the requirements below.")
+        _set_font(sub, size=12)
+        sub.setStyleSheet(f"color: {C_TEXT_MID};")
+        sub.setWordWrap(True)
+        form_layout.addWidget(sub)
+        form_layout.addSpacing(16)
+
+        # New password
+        new_lbl = QLabel("New Password")
+        _set_font(new_lbl, size=10, bold=True)
+        new_lbl.setStyleSheet(f"color: {C_TEXT_LIGHT};")
+        form_layout.addWidget(new_lbl)
+
+        pw_wrap, self._pass_entry = self._make_password_field("Min. 8 characters")
+        form_layout.addWidget(pw_wrap)
+        self._pass_entry.textChanged.connect(self._on_password_type)
+
+        # Strength bar
+        self._strength_bar = QProgressBar()
+        self._strength_bar.setFixedHeight(6)
+        self._strength_bar.setRange(0, 5)
+        self._strength_bar.setValue(0)
+        self._strength_bar.setTextVisible(False)
+        self._strength_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {C_INPUT_BORDER};
+                border-radius: 3px;
+                border: none;
+            }}
+            QProgressBar::chunk {{
+                border-radius: 3px;
+                background-color: {C_TEXT_LIGHT};
+            }}
+        """)
+        form_layout.addWidget(self._strength_bar)
+
+        self._strength_label = QLabel("")
+        _set_font(self._strength_label, size=10)
+        self._strength_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        form_layout.addWidget(self._strength_label)
+
+        # Requirements box
+        req_box = QFrame()
+        req_box.setStyleSheet(
+            f"background-color: #F8FAFF; border: 1px solid {C_INPUT_BORDER}; border-radius: 8px;"
         )
-        self._pass_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self._pass_entry.bind("<KeyRelease>", self._on_password_type)
-        self._pass_entry.bind("<FocusIn>",
-            lambda e: self._pass_entry.configure(border_color=C_INPUT_FOCUS))
-        self._pass_entry.bind("<FocusOut>",
-            lambda e: self._pass_entry.configure(border_color=C_INPUT_BORDER))
+        req_layout = QVBoxLayout(req_box)
+        req_layout.setContentsMargins(14, 10, 14, 10)
+        req_layout.setSpacing(4)
 
-        self._show_pass = False
-        self._pass_toggle_btn = ctk.CTkButton(
-            pw_frame, text="👁",
-            font=("Segoe UI Emoji", 14),
-            fg_color=C_INPUT_BG, hover_color=C_INPUT_BORDER,
-            text_color=C_TEXT_MID,
-            width=42, height=42, corner_radius=8,
-            command=self._toggle_new_password
-        )
-        self._pass_toggle_btn.pack(side="right")
-
-        # ── Password strength indicator ────────────────────
-        # Progress bar showing overall strength
-        self._strength_frame = ctk.CTkFrame(form_wrap, fg_color="transparent")
-        self._strength_frame.pack(fill="x", pady=(0, 4))
-
-        self._strength_bar = ctk.CTkProgressBar(
-            self._strength_frame,
-            height=6, corner_radius=3,
-            fg_color=C_INPUT_BORDER,
-            progress_color=C_TEXT_LIGHT,
-        )
-        self._strength_bar.pack(fill="x")
-        self._strength_bar.set(0)
-
-        self._strength_label = ctk.CTkLabel(
-            self._strength_frame, text="",
-            font=(FONT_PRIMARY, 10), text_color=C_TEXT_LIGHT,
-            fg_color="transparent", anchor="e"
-        )
-        self._strength_label.pack(fill="x")
-
-        # ── Password requirements checklist ────────────────
-        req_box = ctk.CTkFrame(
-            form_wrap, fg_color="#F8FAFF", corner_radius=8,
-            border_width=1, border_color=C_INPUT_BORDER
-        )
-        req_box.pack(fill="x", pady=(0, 14))
-
-        ctk.CTkLabel(
-            req_box, text="Password must contain:",
-            font=(FONT_PRIMARY, 10, "bold"),
-            text_color=C_TEXT_MID, fg_color="transparent"
-        ).pack(anchor="w", padx=14, pady=(10, 4))
+        req_title = QLabel("Password must contain:")
+        _set_font(req_title, size=10, bold=True)
+        req_title.setStyleSheet(f"color: {C_TEXT_MID}; border: none;")
+        req_layout.addWidget(req_title)
 
         self._req_labels = {}
         for key, text, _ in PASSWORD_RULES:
-            row = ctk.CTkFrame(req_box, fg_color="transparent")
-            row.pack(fill="x", padx=14, pady=2)
-            icon_lbl = ctk.CTkLabel(
-                row, text="○", font=FONT_REQ,
-                text_color=C_TEXT_LIGHT, fg_color="transparent", width=16
-            )
-            icon_lbl.pack(side="left", padx=(0, 6))
-            text_lbl = ctk.CTkLabel(
-                row, text=text, font=FONT_REQ,
-                text_color=C_TEXT_LIGHT, fg_color="transparent", anchor="w"
-            )
-            text_lbl.pack(side="left", fill="x")
-            self._req_labels[key] = (icon_lbl, text_lbl)
+            row = QWidget()
+            row.setStyleSheet("background: transparent;")
+            row.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
 
-        ctk.CTkFrame(req_box, height=8, fg_color="transparent").pack()
+            icon = QLabel("-")
+            icon.setFixedWidth(14)
+            icon.setStyleSheet(f"color: {C_TEXT_LIGHT}; border: none; font-size: 11px;")
 
-        # ── Confirm password field with show/hide ──────────
-        ctk.CTkLabel(
-            form_wrap, text="CONFIRM PASSWORD",
-            font=(FONT_PRIMARY, 10, "bold"),
-            text_color=C_TEXT_LIGHT, fg_color="transparent", anchor="w"
-        ).pack(fill="x", pady=(0, 6))
+            text_lbl = QLabel(text)
+            _set_font(text_lbl, size=11)
+            text_lbl.setStyleSheet(f"color: {C_TEXT_LIGHT}; border: none;")
 
-        cf_frame = ctk.CTkFrame(form_wrap, fg_color="transparent")
-        cf_frame.pack(fill="x", pady=(0, 14))
+            row_layout.addWidget(icon)
+            row_layout.addWidget(text_lbl)
+            row_layout.addStretch()
+            req_layout.addWidget(row)
+            self._req_labels[key] = (icon, text_lbl)
 
-        self._confirm_entry = ctk.CTkEntry(
-            cf_frame,
-            placeholder_text="Repeat your new password",
-            font=FONT_INPUT,
-            fg_color=C_INPUT_BG,
-            border_color=C_INPUT_BORDER, border_width=1,
-            text_color=C_TEXT_DARK,
-            placeholder_text_color=C_TEXT_LIGHT,
-            height=42, corner_radius=8, show="●",
-        )
-        self._confirm_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self._confirm_entry.bind("<FocusIn>",
-            lambda e: self._confirm_entry.configure(border_color=C_INPUT_FOCUS))
-        self._confirm_entry.bind("<FocusOut>",
-            lambda e: self._confirm_entry.configure(border_color=C_INPUT_BORDER))
+        form_layout.addWidget(req_box)
+        form_layout.addSpacing(8)
 
-        self._show_confirm = False
-        self._confirm_toggle_btn = ctk.CTkButton(
-            cf_frame, text="👁",
-            font=("Segoe UI Emoji", 14),
-            fg_color=C_INPUT_BG, hover_color=C_INPUT_BORDER,
-            text_color=C_TEXT_MID,
-            width=42, height=42, corner_radius=8,
-            command=self._toggle_confirm_password
-        )
-        self._confirm_toggle_btn.pack(side="right")
+        # Confirm password
+        cf_lbl = QLabel("Confirm Password")
+        _set_font(cf_lbl, size=10, bold=True)
+        cf_lbl.setStyleSheet(f"color: {C_TEXT_LIGHT};")
+        form_layout.addWidget(cf_lbl)
 
-        # ── Status label ───────────────────────────────────
-        self._status_label = ctk.CTkLabel(
-            form_wrap, text="", font=(FONT_PRIMARY, 11),
-            text_color=C_TEXT_MID, fg_color="transparent"
-        )
-        self._status_label.pack(fill="x", pady=(0, 12))
+        cf_wrap, self._confirm_entry = self._make_password_field("Repeat your new password")
+        form_layout.addWidget(cf_wrap)
 
-        # ── Update Password button ─────────────────────────
-        self._update_btn = _primary_btn(
-            form_wrap, "Update Password", self._on_update
-        )
-        self._update_btn.pack(fill="x", pady=(0, 10))
+        self._status_label = QLabel("")
+        _set_font(self._status_label, size=11)
+        self._status_label.setWordWrap(True)
+        form_layout.addWidget(self._status_label)
 
-    # ── Show/hide toggles ──────────────────────────────────
+        self._update_btn = _primary_btn("Update Password", self._on_update)
+        form_layout.addWidget(self._update_btn)
 
-    def _toggle_new_password(self):
-        self._show_pass = not self._show_pass
-        self._pass_entry.configure(show="" if self._show_pass else "●")
-        self._pass_toggle_btn.configure(
-            text="🙈" if self._show_pass else "👁"
-        )
+        content_layout.addWidget(form_wrap)
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
 
-    def _toggle_confirm_password(self):
-        self._show_confirm = not self._show_confirm
-        self._confirm_entry.configure(show="" if self._show_confirm else "●")
-        self._confirm_toggle_btn.configure(
-            text="🙈" if self._show_confirm else "👁"
-        )
-
-    # ── Live password strength checker ─────────────────────
-
-    def _on_password_type(self, event=None):
-        password = self._pass_entry.get()
+    def _on_password_type(self):
+        password = self._pass_entry.text()
         passed = 0
-        total = len(PASSWORD_RULES)
-
         for key, _, rule_fn in PASSWORD_RULES:
             icon_lbl, text_lbl = self._req_labels[key]
             if rule_fn(password):
-                icon_lbl.configure(text="✓", text_color=C_SUCCESS)
-                text_lbl.configure(text_color=C_SUCCESS)
+                icon_lbl.setText("✓")
+                icon_lbl.setStyleSheet(f"color: {C_SUCCESS}; border: none; font-size: 11px;")
+                text_lbl.setStyleSheet(f"color: {C_SUCCESS}; border: none;")
                 passed += 1
             else:
-                icon_lbl.configure(text="○", text_color=C_TEXT_LIGHT)
-                text_lbl.configure(text_color=C_TEXT_LIGHT)
+                icon_lbl.setText("-")
+                icon_lbl.setStyleSheet(f"color: {C_TEXT_LIGHT}; border: none; font-size: 11px;")
+                text_lbl.setStyleSheet(f"color: {C_TEXT_LIGHT}; border: none;")
 
-        # Update strength bar and label
-        ratio = passed / total if total > 0 else 0
-        self._strength_bar.set(ratio)
+        self._strength_bar.setValue(passed)
 
-        if password == "":
-            self._strength_bar.configure(progress_color=C_TEXT_LIGHT)
-            self._strength_label.configure(text="", text_color=C_TEXT_LIGHT)
-        elif passed <= 2:
-            self._strength_bar.configure(progress_color=C_ERROR_RED)
-            self._strength_label.configure(text="Weak", text_color=C_ERROR_RED)
-        elif passed <= 3:
-            self._strength_bar.configure(progress_color=C_WARN)
-            self._strength_label.configure(text="Fair", text_color=C_WARN)
-        elif passed <= 4:
-            self._strength_bar.configure(progress_color=C_ACCENT)
-            self._strength_label.configure(text="Good", text_color=C_ACCENT)
-        else:
-            self._strength_bar.configure(progress_color=C_SUCCESS)
-            self._strength_label.configure(text="Strong", text_color=C_SUCCESS)
+        colors = {0: C_TEXT_LIGHT, 1: C_ERROR_RED, 2: C_ERROR_RED, 3: C_WARN, 4: C_ACCENT, 5: C_SUCCESS}
+        labels = {0: "", 1: "Weak", 2: "Weak", 3: "Fair", 4: "Good", 5: "Strong"}
+        color = colors.get(passed, C_TEXT_LIGHT)
+        label = labels.get(passed, "")
 
-    # ── Update password flow ───────────────────────────────
+        self._strength_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {C_INPUT_BORDER};
+                border-radius: 3px;
+                border: none;
+            }}
+            QProgressBar::chunk {{
+                border-radius: 3px;
+                background-color: {color};
+            }}
+        """)
+        self._strength_label.setText(label)
+        self._strength_label.setStyleSheet(f"color: {color};")
 
     def _on_update(self):
-        password = self._pass_entry.get().strip()
-        confirm = self._confirm_entry.get().strip()
+        password = self._pass_entry.text().strip()
+        confirm = self._confirm_entry.text().strip()
 
         if not password or not confirm:
-            self._status_label.configure(
-                text="Please fill in both password fields.", text_color=C_WARN
-            )
+            self._status_label.setText("Please fill in both password fields.")
+            self._status_label.setStyleSheet(f"color: {C_WARN};")
             return
 
-        # Validate password strength
         errors = validate_password(password)
         if errors:
-            self._status_label.configure(
-                text="Password does not meet requirements.",
-                text_color=C_ERROR_RED
-            )
+            self._status_label.setText("Password does not meet all requirements.")
+            self._status_label.setStyleSheet(f"color: {C_ERROR_RED};")
             return
 
-        # Check passwords match
         if password != confirm:
-            self._status_label.configure(
-                text="Passwords do not match.", text_color=C_ERROR_RED
-            )
+            self._status_label.setText("Passwords do not match.")
+            self._status_label.setStyleSheet(f"color: {C_ERROR_RED};")
             return
 
-        # Disable button while updating
-        self._update_btn.configure(state="disabled", text="Updating...")
-        self._status_label.configure(
-            text="Updating your password...", text_color=C_ACCENT
-        )
+        self._update_btn.setEnabled(False)
+        self._update_btn.setText("Updating...")
+        self._status_label.setText("Updating your password...")
+        self._status_label.setStyleSheet(f"color: {C_ACCENT};")
 
         def bg_task():
             ok, msg = update_password(self._email, password)
-            self.after(0, lambda: self._on_update_result(ok, msg))
+            self.update_signal.emit(ok, msg)
 
         threading.Thread(target=bg_task, daemon=True).start()
 
-    def _on_update_result(self, success: bool, msg: str):
+    def _on_result(self, success: bool, msg: str):
         if success:
-            self._status_label.configure(text="", text_color=C_TEXT_MID)
-
-            # Look up the username so the user knows what to type at login
+            self._status_label.setText("")
             try:
                 from core.database import get_connection
                 with get_connection() as conn:
                     cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT username FROM users WHERE email = ?",
-                        (self._email,)
-                    )
+                    cursor.execute("SELECT username FROM users WHERE email = ?", (self._email,))
                     row = cursor.fetchone()
                 username_hint = row[0] if row else None
             except Exception:
                 username_hint = None
 
-            if username_hint:
-                messagebox.showinfo(
-                    "Password Updated",
-                    f"Your password has been updated successfully.\n\n"
-                    f"Sign in with your username: {username_hint}"
-                )
-            else:
-                messagebox.showinfo(
-                    "Password Updated",
-                    "Your password has been updated successfully.\n"
-                    "You can now log in with your new password."
-                )
+            detail = f"\n\nSign in with your username: {username_hint}" if username_hint else ""
+            QMessageBox.information(self, "Password Updated",
+                f"Your password has been updated successfully.{detail}")
             self._app.show_login()
         else:
-            self._update_btn.configure(state="normal", text="Update Password")
-            self._status_label.configure(text=msg, text_color=C_ERROR_RED)
-
+            self._update_btn.setEnabled(True)
+            self._update_btn.setText("Update Password")
+            self._status_label.setText(msg)
+            self._status_label.setStyleSheet(f"color: {C_ERROR_RED};")
