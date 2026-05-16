@@ -96,8 +96,10 @@ class HandTracker:
 
             self._last_landmarks = landmarks
             
-            # Custom Landmark Overlay (SD002-AC2) to avoid crashed solutions library
-            self._draw_custom_landmarks(annotated_frame, landmarks)
+            # Custom Landmark Overlay (SD002-AC2) — only draw if enabled in settings
+            from core.config import config
+            if config.get("appearance.show_landmark_overlay", True):
+                self._draw_custom_landmarks(annotated_frame, landmarks)
             
             return True, landmarks, annotated_frame
         else:
@@ -144,4 +146,4 @@ class HandTracker:
         try:
             self.release()
         except:
-            pass
+             pass

@@ -28,12 +28,12 @@ from PyQt6.QtWidgets import (
     QScrollArea, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QCursor, QFont
+from PyQt6.QtGui import QCursor, QFont, QPixmap, QPainter, QLinearGradient, QColor
 
 from core.theme import (
     C_ACCENT, C_ACCENT_HOVER, C_WHITE, C_TEXT_DARK, C_TEXT_MID, C_TEXT_LIGHT,
     C_INPUT_BG, C_INPUT_BORDER, C_INPUT_FOCUS, C_CARD_BG, C_CARD_BORDER,
-    C_PANEL_LEFT, C_SUCCESS, C_ERROR_RED, C_WARN,
+    C_PANEL_LEFT, C_SUCCESS, C_ERROR_RED, C_WARN, c, is_dark,
 )
 from core.email_service import (
     generate_otp, get_otp_expiry, is_otp_expired,
@@ -155,11 +155,64 @@ def _outline_btn(text: str, command) -> QPushButton:
     return btn
 
 
+class _GradientPanel(QFrame):
+    """Left auth panel — gradient + logo + tagline."""
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        grad = QLinearGradient(0, 0, 0, self.height())
+        grad.setColorAt(0, QColor(c("panel_left")))
+        grad.setColorAt(1, QColor(c("panel_left_end")))
+        painter.fillRect(self.rect(), grad)
+
+
 def make_left_panel() -> QFrame:
-    panel = QFrame()
+    import os
+    panel = _GradientPanel()
     panel.setFixedWidth(300)
     panel.setObjectName("leftPanel")
-    panel.setStyleSheet(f"QFrame#leftPanel {{ background-color: {PANEL}; border: none; border-radius: 0px; }}")
+    panel.setStyleSheet("border: none; border-radius: 0px;")
+
+    layout = QVBoxLayout(panel)
+    layout.setContentsMargins(32, 40, 32, 40)
+    layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+    # ── Logo image ─────────────────────────────────────
+    logo_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "assets", "logo.png"
+    )
+    logo_lbl = QLabel()
+    logo_lbl.setStyleSheet("background: transparent; border: none;")
+    logo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if os.path.exists(logo_path):
+        px = QPixmap(logo_path).scaled(
+            80, 80,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        logo_lbl.setPixmap(px)
+    else:
+        logo_lbl.setText("🤟")
+        logo_lbl.setStyleSheet("font-size: 48px; background: transparent; border: none;")
+    layout.addWidget(logo_lbl)
+    layout.addSpacing(16)
+
+    # ── App name ───────────────────────────────────────
+    name_lbl = QLabel("SignDesk")
+    name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    text_col = "#FFFFFF" if is_dark() else "#2C3358"
+    name_lbl.setStyleSheet(f"color: {text_col}; background: transparent; border: none; font-size: 26px; font-weight: bold;")
+    layout.addWidget(name_lbl)
+    layout.addSpacing(8)
+
+    # ── Tagline ────────────────────────────────────────
+    tag_lbl = QLabel("Sign language to speech,\nseamlessly.")
+    tag_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    muted_col = "#B8B5D0" if is_dark() else "#5A5490"
+    tag_lbl.setStyleSheet(f"color: {muted_col}; background: transparent; border: none; font-size: 13px;")
+    tag_lbl.setWordWrap(True)
+    layout.addWidget(tag_lbl)
+
     return panel
 
 
@@ -250,7 +303,7 @@ class LoginPage(QWidget):
         # ── right side ────────────────────────────────────────────────
         right = QWidget()
         right.setObjectName("rightPanel")
-        right.setStyleSheet(f"QWidget#rightPanel {{ background-color: {WHITE}; }}")
+        right.setStyleSheet(f"QWidget#rightPanel {{ background-color: {c('bg_primary')}; }}")
         right_lay = QVBoxLayout(right)
         right_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -260,8 +313,8 @@ class LoginPage(QWidget):
         card.setFixedWidth(400)
         card.setStyleSheet(f"""
             QFrame#loginCard {{
-                background-color: {WHITE};
-                border: 1.5px solid {CARD_BRD};
+                background-color: {c('bg_primary')};
+                border: 1.5px solid {c('border')};
                 border-radius: 16px;
             }}
         """)
@@ -272,12 +325,12 @@ class LoginPage(QWidget):
         # heading
         heading = QLabel("Welcome back")
         _set_font(heading, size=24, bold=True)
-        heading.setStyleSheet(f"color: {TXT_DARK}; background: transparent; border: none;")
+        heading.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
         card_lay.addWidget(heading)
 
         sub = QLabel("Sign in to continue to SignDesk")
         _set_font(sub, size=12)
-        sub.setStyleSheet(f"color: {TXT_MID}; background: transparent; border: none;")
+        sub.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; border: none;")
         card_lay.addWidget(sub)
         card_lay.addSpacing(14)
 
@@ -467,7 +520,7 @@ class RegisterPage(QWidget):
 
         heading = QLabel("Create your account")
         _set_font(heading, size=24, bold=True)
-        heading.setStyleSheet(f"color: {TXT_DARK}; background: transparent; border: none;")
+        heading.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
         form.addWidget(heading)
         form.addSpacing(10)
 
@@ -672,7 +725,7 @@ class VerificationPage(QWidget):
 
         heading = QLabel("Verify your email")
         _set_font(heading, size=24, bold=True)
-        heading.setStyleSheet(f"color: {TXT_DARK}; background: transparent; border: none;")
+        heading.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
         lay.addWidget(heading)
 
         sub1 = QLabel("We've sent a verification code to:")

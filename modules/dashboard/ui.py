@@ -11,21 +11,22 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QCursor
 
-from core.theme import c
+from core.theme import c, is_dark
 from core.ui_helpers import create_nav_item, build_steps_panel, _set_font
 
 class GradientSidebar(QFrame):
-    """Sidebar with vertical gradient background."""
+    """Sidebar with vertical gradient background — respects current theme mode."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(210)
 
     def paintEvent(self, event):
+        from core.theme import is_dark
+        dark = is_dark()
         painter = QPainter(self)
         grad = QLinearGradient(0, 0, 0, self.height())
-        # Sidebar is typically always dark-ish, we'll use light/dark params appropriately if needed
-        grad.setColorAt(0, QColor(c("panel_left", dark=True)))
-        grad.setColorAt(1, QColor(c("panel_left_end", dark=True)))
+        grad.setColorAt(0, QColor(c("panel_left", dark=dark)))
+        grad.setColorAt(1, QColor(c("panel_left_end", dark=dark)))
         painter.fillRect(self.rect(), grad)
 
 class DashboardPage(QWidget):
@@ -99,7 +100,7 @@ class DashboardPage(QWidget):
             brand_layout.addWidget(logo_lbl)
 
         title_lbl = QLabel("SignDesk")
-        title_lbl.setStyleSheet("color: #FFFFFF; background: transparent;")
+        title_lbl.setStyleSheet(f"color: {'#FFFFFF' if is_dark() else '#2C3358'}; background: transparent;")
         _set_font(title_lbl, size=16, bold=True)
         brand_layout.addWidget(title_lbl)
 
@@ -108,7 +109,7 @@ class DashboardPage(QWidget):
         # Subtle divider
         div1 = QFrame()
         div1.setFixedHeight(1)
-        div1.setStyleSheet("background-color: #4A4590; border: none;")
+        div1.setStyleSheet(f"background-color: {c('border')}; border: none;")
         layout.addSpacing(16)
         layout.addWidget(div1)
         layout.addSpacing(16)
@@ -118,10 +119,10 @@ class DashboardPage(QWidget):
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setSpacing(2)
 
-        nav_layout.addWidget(create_nav_item(sidebar, "📊", "Dashboard", is_active=True, dark=True))
-        nav_layout.addWidget(create_nav_item(sidebar, "🖐️", "Gesture Translator", command=self._launch_gesture_detection, dark=True))
-        nav_layout.addWidget(create_nav_item(sidebar, "📖", "Sign Dictionary", dark=True))
-        nav_layout.addWidget(create_nav_item(sidebar, "📈", "Gesture History", command=self._launch_gesture_history, dark=True))
+        nav_layout.addWidget(create_nav_item(sidebar, "📊", "Dashboard", is_active=True))
+        nav_layout.addWidget(create_nav_item(sidebar, "🖐️", "Gesture Translator", command=self._launch_gesture_detection))
+        nav_layout.addWidget(create_nav_item(sidebar, "📖", "Sign Dictionary"))
+        nav_layout.addWidget(create_nav_item(sidebar, "📈", "Gesture History", command=self._launch_gesture_history))
 
         layout.addLayout(nav_layout)
         layout.addStretch()
@@ -129,7 +130,7 @@ class DashboardPage(QWidget):
         # ── Bottom section — divider + logout ─────────────
         div2 = QFrame()
         div2.setFixedHeight(1)
-        div2.setStyleSheet("background-color: #4A4590; border: none;")
+        div2.setStyleSheet(f"background-color: {c('border')}; border: none;")
         layout.addWidget(div2)
         layout.addSpacing(8)
 
@@ -137,7 +138,7 @@ class DashboardPage(QWidget):
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(2)
 
-        bottom_layout.addWidget(create_nav_item(sidebar, "⚙️", "Settings", command=self._launch_settings, dark=True))
+        bottom_layout.addWidget(create_nav_item(sidebar, "⚙️", "Settings", command=self._launch_settings))
 
         # Custom logout item with red text
         logout_btn = QWidget()
@@ -161,7 +162,7 @@ class DashboardPage(QWidget):
         lo_layout.addStretch()
 
         # Hover logic for logout
-        def enterEvent(e): logout_btn.setStyleSheet("background-color: #3D4470; border-radius: 10px;")
+        def enterEvent(e): logout_btn.setStyleSheet(f"background-color: {c('input_bg')}; border-radius: 10px;")
         def leaveEvent(e): logout_btn.setStyleSheet("background-color: transparent; border-radius: 10px;")
         def mousePressEvent(e): 
             if e.button() == Qt.MouseButton.LeftButton:

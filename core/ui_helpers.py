@@ -48,18 +48,23 @@ class HoverNavWidget(QWidget):
 
 def create_nav_item(parent: QWidget, icon: str, label: str,
                     is_active: bool = False, command=None,
-                    dark: bool = False) -> QWidget:
+                    dark: bool = None) -> QWidget:
     """
     Reusable sidebar navigation item.
+    dark=None means follow the global theme state.
     """
+    from core.theme import is_dark as _is_dark
+    if dark is None:
+        dark = _is_dark()
+
     if is_active:
         bg_normal = "#2D2D3D" if dark else "#495086"
         bg_hover = bg_normal
     else:
         bg_normal = "transparent"
-        bg_hover = "#3D4470"
+        bg_hover = "#3D4470" if dark else "#D6D3E8"
 
-    text_color = "#FFFFFF" if is_active else ("#84849E" if dark else "#B8B5D0")
+    text_color = "#FFFFFF" if is_active else ("#84849E" if dark else "#2C3358")
 
     frame = HoverNavWidget(bg_normal, bg_hover, command)
     frame.setFixedHeight(38)

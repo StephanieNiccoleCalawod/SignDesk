@@ -67,8 +67,8 @@ COLORS = {
     "bg_primary":    ("#FFFFFF", "#141416"),   # Main cards & panels
     "bg_secondary":  ("#F3F1F8", "#0A0A0B"),   # Window background
 
-    "panel_left":     ("#2C3358", "#1A1A1E"),  # Sidebar bg (always dark-ish)
-    "panel_left_end": ("#6C63FF", "#282836"),  # Sidebar gradient end
+    "panel_left":     ("#EEF0FB", "#1A1A1E"),  # Sidebar bg
+    "panel_left_end": ("#D8D5F7", "#282836"),  # Sidebar gradient end
 
     "text_primary":   ("#1F1F1F", "#F1F1F5"),  # Headings, active text
     "text_secondary": ("#6B7280", "#9CA3AF"),   # Subtitles
@@ -98,24 +98,23 @@ COLORS = {
 }
 
 
+# ── Global dark-mode state ─────────────────────────────────────────────────
+_CURRENT_DARK: bool = False
+
+def set_dark_mode(dark: bool) -> None:
+    global _CURRENT_DARK
+    _CURRENT_DARK = dark
+
+def is_dark() -> bool:
+    return _CURRENT_DARK
+
 # ── Primary color resolver ─────────────────────────────────────────────────
 
-def c(key: str, dark: bool = False) -> str:
-    """
-    Resolve a COLORS key to a hex string for the requested mode.
-
-    Parameters
-    ----------
-    key  : any key in the COLORS dict
-    dark : True → return dark-mode value, False → light-mode value
-
-    Examples
-    --------
-    >>> c("accent")           # "#6C63FF"  (same both modes)
-    >>> c("bg_primary", dark=True)  # "#141416"
-    """
+def c(key: str, dark=None) -> str:
+    """Resolve a COLORS key. Uses global dark-mode state if dark is None."""
     pair = COLORS.get(key, ("#FFFFFF", "#FFFFFF"))
-    return pair[1] if dark else pair[0]
+    use_dark = _CURRENT_DARK if dark is None else dark
+    return pair[1] if use_dark else pair[0]
 
 
 # ── Legacy C_ constants ────────────────────────────────────────────────────
@@ -468,6 +467,7 @@ def apply_qt_theme(dark: bool = False) -> None:
         from PyQt6.QtWidgets import QApplication
         app = QApplication.instance()
         if app is not None:
+            set_dark_mode(dark)
             app.setStyle("Fusion")
             app.setStyleSheet(build_qss(dark))
             # Broadcast so all subscribed widgets can update themselves

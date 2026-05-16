@@ -303,7 +303,7 @@ class SettingsPage(QWidget):
         parent_layout.addWidget(row_widget)
         return r_layout
 
-    def _toggle_row(self, parent_layout, label, desc, key, disabled=False):
+    def _toggle_row(self, parent_layout, label, desc, key, disabled=False, on_change=None):
         right_layout = self._row(parent_layout, label, desc)
 
         cb = QCheckBox()
@@ -320,13 +320,15 @@ class SettingsPage(QWidget):
             
         def _on_toggle(state):
             config.set(key, bool(state))
+            if on_change:
+                on_change(bool(state))
             
         cb.stateChanged.connect(_on_toggle)
         right_layout.addWidget(cb)
         
         self._row_divider(parent_layout)
 
-    def _select_row(self, parent_layout, label, desc, key, options):
+    def _select_row(self, parent_layout, label, desc, key, options, on_change=None):
         right_layout = self._row(parent_layout, label, desc)
 
         current = config.get(key, options[0][0])
@@ -357,6 +359,8 @@ class SettingsPage(QWidget):
         
         def _on_change(idx):
             config.set(key, values[idx])
+            if on_change:
+                on_change(values[idx])
             
         combo.currentIndexChanged.connect(_on_change)
         right_layout.addWidget(combo)
@@ -856,12 +860,98 @@ class SettingsPage(QWidget):
     # SECTION: APPEARANCE
     # ══════════════════════════════════════════════════════
 
+    def _apply_theme(self, theme_value: str):
+        """Apply the selected theme and rebuild the settings page to pick up new colours."""
+        from core.theme import apply_qt_theme
+        import platform
+
+        if theme_value == "dark":
+            apply_qt_theme(dark=True)
+        elif theme_value == "high-contrast":
+            apply_qt_theme(dark=True)
+        elif theme_value == "system":
+            try:
+                if platform.system() == "Windows":
+                    import winreg
+                    reg_key = winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+                    val, _ = winreg.QueryValueEx(reg_key, "AppsUseLightTheme")
+                    apply_qt_theme(dark=(val == 0))
+                else:
+                    apply_qt_theme(dark=False)
+            except Exception:
+                apply_qt_theme(dark=False)
+        else:
+            apply_qt_theme(dark=False)
+
+        # Rebuild the entire settings UI so every widget re-calls c() with the new mode
+        self._rebuild_all()
+
+    def _rebuild_all(self):
+        """Tear down and rebuild every section so colour tokens reflect the current theme."""
+        # Remember where we were
+        current_section = self._active_section
+
+        # Remove the stacked widget from the main layout
+        layout = self.layout()
+        old_stacked = self._stacked
+        layout.removeWidget(old_stacked)
+        old_stacked.deleteLater()
+
+        # Reset tracking dicts
+        self._nav_buttons = {}
+        self._save_labels = {}
+
+        # Re-apply sidebar colours (the sidebar is the first widget in layout)
+        sidebar = layout.itemAt(0).widget() if layout.count() > 0 else None
+        if sidebar:
+            layout.removeWidget(sidebar)
+            sidebar.deleteLater()
+
+        # Rebuild everything from scratch into the existing layout
+        self.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        self._build_sidebar(layout)
+        self._build_content_area(layout)
+        self._show_section(current_section)
+
+    def _apply_font_size(self, size_value: str):
+        """Apply the selected font size globally."""
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtGui import QFont
+        size_map = {"small": 11, "medium": 13, "large": 15, "xl": 17}
+        pt = size_map.get(size_value, 13)
+        app = QApplication.instance()
+        if app:
+            font = QFont("Segoe UI", pt)
+            app.setFont(font)
+
     def _build_appearance(self, parent_layout):
         self._section_title(parent_layout, "Appearance")
         card = self._card(parent_layout)
-        self._select_row(card, "Theme", "App color scheme", "appearance.theme", [("system", "System default"), ("light", "Light"), ("dark", "Dark"), ("high-contrast", "High contrast")])
-        self._select_row(card, "Font size", "Affects gesture text output", "appearance.font_size", [("small", "Small"), ("medium", "Medium"), ("large", "Large"), ("xl", "Extra large")])
-        self._toggle_row(card, "Show landmark overlay", "Draw hand keypoints on webcam view", "appearance.show_landmark_overlay")
+        self._select_row(
+            card, "Theme", "App color scheme",
+            "appearance.theme",
+            [("system", "System default"), ("light", "Light"), ("dark", "Dark"), ("high-contrast", "High contrast")],
+            on_change=self._apply_theme,
+        )
+        self._select_row(
+            card, "Font size", "Affects gesture text output",
+            "appearance.font_size",
+            [("small", "Small"), ("medium", "Medium"), ("large", "Large"), ("xl", "Extra large")],
+            on_change=self._apply_font_size,
+        )
+        self._toggle_row(
+            card, "Show landmark overlay", "Draw hand keypoints on webcam view",
+            "appearance.show_landmark_overlay",
+            on_change=self._apply_landmark_overlay,
+        )
+
+    def _apply_landmark_overlay(self, enabled: bool):
+        """Notify the vision module (if running) to show/hide the hand keypoint overlay."""
+        # The vision module reads config.get("appearance.show_landmark_overlay") on each frame,
+        # so writing to config is sufficient — no explicit signal needed.
+        pass
 
     # ══════════════════════════════════════════════════════
     # SECTION: GESTURE RECOGNITION
@@ -1047,6 +1137,14 @@ class SettingsPage(QWidget):
 
     def _on_save(self):
         config.save()
+
+        # Re-apply live settings for the active section
+        if self._active_section == "appearance":
+            theme_val = config.get("appearance.theme", "system")
+            font_val = config.get("appearance.font_size", "medium")
+            self._apply_font_size(font_val)
+            self._apply_theme(theme_val)  # rebuilds page last
+
         saved_label = self._save_labels.get(self._active_section)
         if not saved_label:
             return
