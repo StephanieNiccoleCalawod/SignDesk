@@ -24,9 +24,6 @@ class SignDeskApp(QMainWindow):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self.setCentralWidget(self._central_widget)
         
-        from core.config import config
-        config.load()
-
         from modules.settings.account_backend import init_account_db
         init_account_db()
 
@@ -58,6 +55,9 @@ class SignDeskApp(QMainWindow):
         self.setGeometry(x, y, width, height)
 
     def show_login(self):
+        if self._current_user:
+            from core.audit_log import log_event
+            log_event("LOGOUT", self._current_user)
         self._current_user = None
         self._current_user_id = None
         self._clear()
@@ -160,14 +160,40 @@ class SignDeskApp(QMainWindow):
         self._current_page = GestureLogViewerPage(self._central_widget, self, username)
         self._layout.addWidget(self._current_page)
 
+def _resolve_dark_mode(theme_value: str) -> bool:
+    """Determine whether dark mode should be active based on the saved theme preference."""
+    if theme_value == "dark" or theme_value == "high-contrast":
+        return True
+    if theme_value == "system":
+        try:
+            import platform
+            if platform.system() == "Windows":
+                import winreg
+                reg_key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+                val, _ = winreg.QueryValueEx(reg_key, "AppsUseLightTheme")
+                return val == 0
+        except Exception:
+            pass
+        return False
+    return False  # "light" or unknown
+
+
 if __name__ == "__main__":
     from core.database import update_database_schema
     update_database_schema()
     
     app = QApplication(sys.argv)
     
-    # Apply global theme QSS
-    app.setStyleSheet(build_qss())
+    # Load config BEFORE building QSS so saved theme preference is respected
+    from core.config import config
+    config.load()
+
+    from core.theme import set_dark_mode
+    dark = _resolve_dark_mode(config.get("appearance.theme", "system"))
+    set_dark_mode(dark)
+    app.setStyleSheet(build_qss(dark=dark))
     
     window = SignDeskApp()
     window.show()

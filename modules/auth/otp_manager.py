@@ -2,6 +2,12 @@
 otp_manager.py - Password Reset OTP Lifecycle Manager
 Handles OTP generation, storage, verification, invalidation, and password update
 for the Forgot Password flow. Uses the otp_tokens table in SQLite.
+
+Encryption layer (v2)
+---------------------
+All email lookups in both `users` and `otp_tokens` use hmac_hash().
+The `email` column in otp_tokens stores the HMAC hash — the plaintext
+email is never written to the database.
 """
 
 import bcrypt
@@ -9,17 +15,18 @@ from datetime import datetime, timedelta
 
 from core.database import get_connection
 from core.email_service import generate_otp
+from core.crypto import hmac_hash
+from core.audit_log import log_event
 
 
 # ──────────────────────────────────────────────────────────────
-# PASSWORD RESET OTP EXPIRY (10 minutes, independent of registration)
+# OTP EXPIRY
 # ──────────────────────────────────────────────────────────────
 
 PASSWORD_RESET_OTP_EXPIRY_MINUTES = 10
 
 
 def _get_reset_otp_expiry() -> datetime:
-    """Returns the expiry timestamp for a password-reset OTP (10 minutes)."""
     return datetime.now() + timedelta(minutes=PASSWORD_RESET_OTP_EXPIRY_MINUTES)
 
 
@@ -30,25 +37,25 @@ def _get_reset_otp_expiry() -> datetime:
 def check_email_exists(email: str) -> tuple[bool, str]:
     """
     Checks if a user account exists for the given email.
-    Does NOT require email_verified — the password reset OTP itself
-    proves email ownership, so unverified accounts can reset too.
+    Lookup via HMAC hash — plaintext never reaches the DB query.
     Returns (True, "") if found, (False, "error message") if not.
     """
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT 1 FROM users WHERE email = ?", (email,)
+                "SELECT 1 FROM users WHERE email = ?",
+                (hmac_hash(email, normalize=True),)
             )
             row = cursor.fetchone()
 
         if row is None:
             return False, "No account found with this email address."
-
         return True, ""
 
     except Exception as e:
-        return False, f"Database error: {str(e)}"
+        print(f"[otp] check_email_exists error: {e}")
+        return False, "An unexpected error occurred. Please try again."
 
 
 # ──────────────────────────────────────────────────────────────
@@ -59,24 +66,25 @@ def create_otp(email: str) -> str:
     """
     Generates a secure 6-digit OTP, invalidates any previous tokens
     for this email, and inserts a new token into otp_tokens.
+    The email is stored as its HMAC hash.
     Returns the OTP code string.
     """
-    otp_code = generate_otp()
-    expiry = _get_reset_otp_expiry()
+    otp_code   = generate_otp()
+    expiry     = _get_reset_otp_expiry()
+    email_hash = hmac_hash(email, normalize=True)
 
     with get_connection() as conn:
         cursor = conn.cursor()
 
-        # Invalidate all previous unused tokens for this email
         cursor.execute(
             "UPDATE otp_tokens SET is_used = 1 WHERE email = ? AND is_used = 0",
-            (email,)
+            (email_hash,)
         )
 
-        # Insert new token
         cursor.execute(
-            "INSERT INTO otp_tokens (email, otp_code, expires_at, is_used) VALUES (?, ?, ?, 0)",
-            (email, otp_code, expiry)
+            "INSERT INTO otp_tokens (email, otp_code, expires_at, is_used) "
+            "VALUES (?, ?, ?, 0)",
+            (email_hash, otp_code, expiry)
         )
 
     return otp_code
@@ -93,19 +101,19 @@ def verify_otp(email: str, code: str) -> tuple[bool, str]:
     Does NOT mark the token as used — that happens in update_password().
     """
     try:
+        email_hash = hmac_hash(email, normalize=True)
+
         with get_connection() as conn:
             cursor = conn.cursor()
-
-            # Get the most recent unused token for this email
             cursor.execute(
                 """
                 SELECT id, otp_code, expires_at
-                FROM   otp_tokens
-                WHERE  email = ? AND is_used = 0
-                ORDER BY id DESC
-                LIMIT 1
+                  FROM otp_tokens
+                 WHERE email = ? AND is_used = 0
+                 ORDER BY id DESC
+                 LIMIT 1
                 """,
-                (email,)
+                (email_hash,)
             )
             row = cursor.fetchone()
 
@@ -114,18 +122,20 @@ def verify_otp(email: str, code: str) -> tuple[bool, str]:
 
         token_id, stored_code, expires_at = row
 
-        # Check expiry
         if datetime.now() > expires_at:
             return False, "Verification code has expired. Please request a new one."
 
-        # Check code match
         if stored_code != code:
+            log_event("OTP_VERIFY_FAILED", email, "Incorrect code")
             return False, "Incorrect verification code."
 
+        log_event("OTP_VERIFY_SUCCESS", email)
         return True, "Verified"
 
     except Exception as e:
-        return False, f"Database error: {str(e)}"
+        print(f"[otp] verify_otp error: {e}")
+        log_event("OTP_VERIFY_FAILED", email, "Internal error")
+        return False, "An unexpected error occurred. Please try again."
 
 
 # ──────────────────────────────────────────────────────────────
@@ -135,11 +145,12 @@ def verify_otp(email: str, code: str) -> tuple[bool, str]:
 def invalidate_otp(email: str):
     """Marks all OTP tokens for this email as used."""
     try:
+        email_hash = hmac_hash(email, normalize=True)
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE otp_tokens SET is_used = 1 WHERE email = ?",
-                (email,)
+                (email_hash,)
             )
     except Exception as e:
         print(f"OTP invalidation error: {e}")
@@ -156,7 +167,8 @@ def update_password(email: str, new_password: str) -> tuple[bool, str]:
     Returns (True, "success") or (False, "error message").
     """
     try:
-        # Hash the new password
+        email_hash = hmac_hash(email, normalize=True)
+
         password_hash = bcrypt.hashpw(
             new_password.encode("utf-8"),
             bcrypt.gensalt()
@@ -165,27 +177,26 @@ def update_password(email: str, new_password: str) -> tuple[bool, str]:
         with get_connection() as conn:
             cursor = conn.cursor()
 
-            # Update the password and auto-verify email (receiving OTP proves ownership)
             cursor.execute(
                 "UPDATE users SET password_hash = ?, email_verified = 1 WHERE email = ?",
-                (password_hash, email)
+                (password_hash, email_hash)
             )
 
             if cursor.rowcount == 0:
                 return False, "Account not found."
 
-            # Verify the write persisted (read back the hash)
             cursor.execute(
-                "SELECT password_hash FROM users WHERE email = ?", (email,)
+                "SELECT password_hash FROM users WHERE email = ?", (email_hash,)
             )
             verify_row = cursor.fetchone()
             if verify_row is None or verify_row[0] != password_hash:
                 return False, "Password update failed — verification read mismatch."
 
-        # Invalidate all OTP tokens for this email
         invalidate_otp(email)
-
+        log_event("PASSWORD_RESET_SUCCESS", email, "Password reset via OTP")
         return True, "Password updated successfully."
 
     except Exception as e:
-        return False, f"Database error: {str(e)}"
+        print(f"[otp] update_password error: {e}")
+        log_event("PASSWORD_RESET_FAILED", email, "Internal error")
+        return False, "An unexpected error occurred. Please try again."

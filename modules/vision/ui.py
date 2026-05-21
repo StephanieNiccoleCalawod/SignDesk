@@ -45,17 +45,19 @@ from modules.vision.tracker import HandTracker
 # ══════════════════════════════════════════════════════════════════════════════
 
 class GradientSidebar(QFrame):
-    """Sidebar with vertical gradient background."""
+    """Sidebar with vertical gradient background — respects current theme mode."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(210)
 
     def paintEvent(self, event):  # noqa: N802
+        from core.theme import is_dark
+        dark = is_dark()
         painter = QPainter(self)
         grad = QLinearGradient(0, 0, 0, self.height())
-        grad.setColorAt(0, QColor(c("panel_left", dark=True)))
-        grad.setColorAt(1, QColor(c("panel_left_end", dark=True)))
+        grad.setColorAt(0, QColor(c("panel_left", dark=dark)))
+        grad.setColorAt(1, QColor(c("panel_left_end", dark=dark)))
         painter.fillRect(self.rect(), grad)
 
 
@@ -112,6 +114,18 @@ class GestureDetectionPage(QWidget):
         self._build_main_area(layout)
 
     def _build_sidebar(self, parent_layout: QHBoxLayout) -> None:
+        from core.theme import is_dark
+        dark = is_dark()
+
+        # title color: white on dark sidebar, dark navy on light sidebar
+        title_col  = "#FFFFFF" if dark else "#2C3358"
+        label_col  = c("text_primary")
+        item_col   = "#B8B5D0" if dark else c("text_secondary")
+        val_col    = "#FFFFFF" if dark else c("text_primary")
+        divider_col = "#4A4590" if dark else c("border")
+        hover_col  = "#3D4470" if dark else "#D6D3E8"
+        card_bg    = "rgba(255,255,255,0.12)" if dark else "rgba(255,255,255,0.55)"
+
         sidebar = GradientSidebar(self)
         parent_layout.addWidget(sidebar)
 
@@ -139,7 +153,7 @@ class GestureDetectionPage(QWidget):
             brand.addWidget(lbl)
 
         title = QLabel("SignDesk")
-        title.setStyleSheet("color: #FFFFFF; background: transparent;")
+        title.setStyleSheet(f"color: {title_col}; background: transparent;")
         _set_font(title, 16, bold=True)
         brand.addWidget(title)
         layout.addLayout(brand)
@@ -148,71 +162,106 @@ class GestureDetectionPage(QWidget):
         layout.addSpacing(16)
         div1 = QFrame()
         div1.setFixedHeight(1)
-        div1.setStyleSheet("background-color: #4A4590; border: none;")
+        div1.setStyleSheet(f"background-color: {divider_col}; border: none;")
         layout.addWidget(div1)
         layout.addSpacing(16)
 
-        # Back nav item
-        nav = QVBoxLayout()
-        nav.setSpacing(2)
-        nav.addWidget(create_nav_item(
-            sidebar, "←", "Back to Dashboard",
-            command=self._on_back, dark=True,
-        ))
-        layout.addLayout(nav)
-        layout.addSpacing(24)
+        # ── Back to Dashboard button ──────────────────────
+        back_btn = QPushButton("←  Back to Dashboard")
+        back_btn.setFixedHeight(36)
+        back_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        back_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #495086;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 18px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                font-weight: bold;
+                padding: 0px 16px;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: #3F4678;
+            }}
+        """)
+        back_btn.clicked.connect(self._on_back)
+        layout.addWidget(back_btn)
+        layout.addSpacing(20)
 
-        # System settings labels
+        # ── System settings card ──────────────────────────
         sys_lbl = QLabel("SYSTEM SETTINGS")
-        sys_lbl.setStyleSheet("color: #84849E; background: transparent;")
-        _set_font(sys_lbl, 11, bold=True)
+        sys_lbl.setStyleSheet(f"color: {label_col}; background: transparent;")
+        _set_font(sys_lbl, 10, bold=True)
         layout.addWidget(sys_lbl)
-        layout.addSpacing(10)
+        layout.addSpacing(8)
+
+        settings_card = QWidget()
+        settings_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        settings_card.setStyleSheet(f"""
+            background-color: {card_bg};
+            border-radius: 12px;
+            border: none;
+        """)
+        s_layout = QVBoxLayout(settings_card)
+        s_layout.setContentsMargins(14, 10, 14, 10)
+        s_layout.setSpacing(0)
 
         settings = [
-            ("Camera",     "Built-in HD",                            "📷"),
-            ("Model",      "ASL Standard",                           "🧠"),
-            ("Confidence", f"Min {int(self._conf_threshold * 100)}%","🎯"),
-            ("Hold Time",  f"{self._hold_duration}s",                "⏱️"),
+            ("Camera",     "Built-in HD",                            "◉"),
+            ("Model",      "ASL Standard",                           "◈"),
+            ("Confidence", f"Min {int(self._conf_threshold * 100)}%","▣"),
+            ("Hold Time",  f"{self._hold_duration}s",                "◷"),
         ]
-        for title_txt, val, icon in settings:
+        for idx, (title_txt, val, icon) in enumerate(settings):
             row = QWidget()
             r = QHBoxLayout(row)
-            r.setContentsMargins(0, 0, 0, 0)
+            r.setContentsMargins(0, 6, 0, 6)
             i_lbl = QLabel(icon)
             i_lbl.setStyleSheet(
-                "color: #B8B5D0; font-family: 'Segoe UI Emoji'; background: transparent;")
+                f"color: {item_col}; background: transparent; border: none;")
+            _set_font(i_lbl, 12)
             t_lbl = QLabel(title_txt)
-            t_lbl.setStyleSheet("color: #B8B5D0; background: transparent;")
+            t_lbl.setStyleSheet(f"color: {item_col}; background: transparent;")
             _set_font(t_lbl, 11)
             v_lbl = QLabel(val)
-            v_lbl.setStyleSheet("color: #FFFFFF; background: transparent;")
+            v_lbl.setStyleSheet(f"color: {val_col}; background: transparent;")
             _set_font(v_lbl, 11, bold=True)
             r.addWidget(i_lbl)
+            r.addSpacing(4)
             r.addWidget(t_lbl)
             r.addStretch()
             r.addWidget(v_lbl)
-            layout.addWidget(row)
-            layout.addSpacing(8)
+            s_layout.addWidget(row)
 
+            # Add subtle divider between rows (not after last)
+            if idx < len(settings) - 1:
+                row_div = QFrame()
+                row_div.setFixedHeight(1)
+                row_div.setStyleSheet(f"background-color: {divider_col}; border: none;")
+                s_layout.addWidget(row_div)
+
+        layout.addWidget(settings_card)
         layout.addStretch()
 
         # Logout Button
         div2 = QFrame()
         div2.setFixedHeight(1)
-        div2.setStyleSheet("background-color: #4A4590; border: none;")
+        div2.setStyleSheet(f"background-color: {divider_col}; border: none;")
         layout.addWidget(div2)
         layout.addSpacing(8)
 
-        self._logout_btn = QPushButton("🚪  Logout")
+        self._logout_btn = QPushButton("→  Logout")
         self._logout_btn.setFixedHeight(38)
         self._logout_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._logout_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: #FF8A80; text-align: left;
-                padding-left: 12px; border-radius: 10px; font-family: 'Segoe UI'; font-size: 13px; font-weight: bold;
+                padding-left: 12px; border-radius: 10px;
+                font-family: 'Segoe UI'; font-size: 13px; font-weight: bold;
             }}
-            QPushButton:hover {{ background-color: #3D4470; }}
+            QPushButton:hover {{ background-color: {hover_col}; }}
         """)
         self._logout_btn.clicked.connect(self._on_logout)
         layout.addWidget(self._logout_btn)
@@ -299,13 +348,13 @@ class GestureDetectionPage(QWidget):
 
         # FPS label
         fps_row = QHBoxLayout()
-        cam_title = QLabel("📷  Live Detection")
+        cam_title = QLabel("Live Detection")
         cam_title.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
         _set_font(cam_title, 14, bold=True)
         fps_row.addWidget(cam_title)
         fps_row.addStretch()
         self._fps_label = QLabel("FPS: --")
-        self._fps_label.setStyleSheet(f"color: {c('text_muted')}; background: transparent; border: none;")
+        self._fps_label.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; border: none;")
         _set_font(self._fps_label, 11)
         fps_row.addWidget(self._fps_label)
         layout.addLayout(fps_row)
@@ -320,7 +369,7 @@ class GestureDetectionPage(QWidget):
         # Placeholder
         self._cam_placeholder = QLabel("📸\n\nCamera Offline\n\nClick 'Start Detection' to activate your webcam.")
         self._cam_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._cam_placeholder.setStyleSheet(f"color: {c('text_muted')}; background: transparent; font-size: 14px; border: none;")
+        self._cam_placeholder.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; font-size: 14px; border: none;")
         self._cam_placeholder.setWordWrap(True)
         layout.addWidget(self._cam_placeholder)
 
@@ -346,7 +395,7 @@ class GestureDetectionPage(QWidget):
 
         hdr = QHBoxLayout()
         s_lbl = QLabel("System Status")
-        s_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        s_lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
         _set_font(s_lbl, 11, bold=True)
         hdr.addWidget(s_lbl)
         hdr.addStretch()
@@ -372,25 +421,25 @@ class GestureDetectionPage(QWidget):
         layout.addWidget(status_card)
 
         # ── Confidence card ───────────────────────────────
-        conf_card = QFrame()
-        conf_card.setStyleSheet(f"""
+        self._conf_card = QFrame()
+        self._conf_card.setStyleSheet(f"""
             QFrame {{
                 background-color: {c('bg_primary')};
                 border: 1px solid {c('border')};
                 border-radius: 14px;
             }}
         """)
-        c_layout = QVBoxLayout(conf_card)
+        c_layout = QVBoxLayout(self._conf_card)
         c_layout.setContentsMargins(20, 14, 20, 14)
 
         ch = QHBoxLayout()
         c_lbl = QLabel("Match Confidence")
-        c_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        c_lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
         _set_font(c_lbl, 11, bold=True)
         ch.addWidget(c_lbl)
         ch.addStretch()
         self._conf_value_label = QLabel("0%")
-        self._conf_value_label.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        self._conf_value_label.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
         _set_font(self._conf_value_label, 12, bold=True)
         ch.addWidget(self._conf_value_label)
         c_layout.addLayout(ch)
@@ -409,7 +458,7 @@ class GestureDetectionPage(QWidget):
         # Hold progress bar
         hold_row = QHBoxLayout()
         h_lbl = QLabel("Hold to confirm:")
-        h_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        h_lbl.setStyleSheet(f"color: {c('text_secondary')}; border: none; background: transparent;")
         _set_font(h_lbl, 10)
         hold_row.addWidget(h_lbl)
 
@@ -429,7 +478,12 @@ class GestureDetectionPage(QWidget):
         self._conf_warning.setStyleSheet(f"color: {c('warn')}; border: none; background: transparent;")
         _set_font(self._conf_warning, 10)
         c_layout.addWidget(self._conf_warning)
-        layout.addWidget(conf_card)
+
+        # Respect show_confidence_indicator setting
+        if not config.get("gesture.show_confidence_indicator", True):
+            self._conf_card.hide()
+
+        layout.addWidget(self._conf_card)
 
         # ── Output card ───────────────────────────────────
         out_card = QFrame()
@@ -445,7 +499,7 @@ class GestureDetectionPage(QWidget):
 
         oh = QHBoxLayout()
         o_lbl = QLabel("Current Output")
-        o_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        o_lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
         _set_font(o_lbl, 11, bold=True)
         oh.addWidget(o_lbl)
         oh.addStretch()
@@ -469,7 +523,7 @@ class GestureDetectionPage(QWidget):
         o_layout.addWidget(self._output_textbox)
 
         f_lbl = QLabel("Finalized Sentences")
-        f_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        f_lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
         _set_font(f_lbl, 11, bold=True)
         o_layout.addWidget(f_lbl)
 
@@ -505,7 +559,7 @@ class GestureDetectionPage(QWidget):
         sh.addWidget(seq_lbl)
         sh.addStretch()
         seq_clr = QPushButton("Clear")
-        seq_clr.setStyleSheet(f"background: transparent; color: {c('text_muted')}; border: none; font-size: 11px;")
+        seq_clr.setStyleSheet(f"background: transparent; color: {c('text_secondary')}; border: none; font-size: 11px; font-weight: bold;")
         seq_clr.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         seq_clr.clicked.connect(self._clear_history)
         sh.addWidget(seq_clr)
@@ -558,7 +612,7 @@ class GestureDetectionPage(QWidget):
         # Voice Selector
         voice_row = QHBoxLayout()
         voice_lbl = QLabel("Voice:")
-        voice_lbl.setStyleSheet(f"color: {c('text_muted')}; background: transparent; border: none;")
+        voice_lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
         _set_font(voice_lbl, 11)
         voice_row.addWidget(voice_lbl)
 
@@ -799,7 +853,7 @@ class GestureDetectionPage(QWidget):
                 self._refresh_output()
                 if self._live_speech_enabled:
                     word_assembler.add_space()
-            self._set_status_pill("🔍  Analyzing…", c("info_bg"), c("info"))
+            self._set_status_pill("Analyzing…", c("info_bg"), c("info"))
 
     def _process_no_gesture(self) -> None:
         self._gesture_label.setText("—")
@@ -903,8 +957,13 @@ class GestureDetectionPage(QWidget):
         self._status_pill.setStyleSheet(f"background-color: {bg}; color: {fg}; border-radius: 10px; padding: 4px 10px; font-weight: bold; border: none;")
 
     def _set_tts_status(self, text: str, bg: str, fg: str) -> None:
-        self._tts_status_pill.setText(text)
-        self._tts_status_pill.setStyleSheet(f"background-color: {bg}; color: {fg}; border-radius: 10px; padding: 3px 10px; font-weight: bold; border: none; font-size: 11px;")
+        try:
+            self._tts_status_pill.setText(text)
+            self._tts_status_pill.setStyleSheet(f"background-color: {bg}; color: {fg}; border-radius: 10px; padding: 3px 10px; font-weight: bold; border: none; font-size: 11px;")
+        except RuntimeError:
+            # Widget was destroyed before the QTimer callback fired (e.g. window closed
+            # during the 2500 ms delay). Safe to ignore.
+            pass
 
     def _update_hold_bar(self, progress: float) -> None:
         pct = int(min(1.0, max(0.0, progress)) * 100)
@@ -913,6 +972,13 @@ class GestureDetectionPage(QWidget):
         self._hold_bar.setStyleSheet(f"QProgressBar {{ background-color: {c('border')}; border: none; border-radius: 3px; }} QProgressBar::chunk {{ background-color: {color}; border-radius: 3px; }}")
 
     def _update_confidence(self, confidence: float) -> None:
+        # Respect the show_confidence_indicator setting (live check per frame)
+        show = config.get("gesture.show_confidence_indicator", True)
+        if hasattr(self, '_conf_card'):
+            self._conf_card.setVisible(show)
+        if not show:
+            return
+
         pct = int(confidence * 100)
         self._conf_value_label.setText(f"{pct}%")
         self._conf_bar.setValue(pct)

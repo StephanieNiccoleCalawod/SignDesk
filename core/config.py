@@ -19,7 +19,6 @@ DEFAULT_SETTINGS = {
     # Gesture Recognition
     "gesture.confidence_threshold": 70,
     "gesture.timeout": 2.0,
-    "gesture.library": "asl-standard",
     "gesture.show_confidence_indicator": True,
 
     # Speech Output
@@ -34,9 +33,6 @@ DEFAULT_SETTINGS = {
 
     # Accessibility
     "accessibility.screen_reader_support": True,
-    "accessibility.reduce_motion": False,
-    "accessibility.keyboard_navigation": True,
-    "accessibility.haptic_feedback": False,
 
     # Webcam
     "webcam.auto_start_on_launch": True,

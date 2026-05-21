@@ -19,10 +19,30 @@ class CameraManager:
     - SD001-AC4: Feed refreshes in real time at ≥24 FPS
     """
 
+    # Resolution presets: config value → (width, height)
+    _RESOLUTION_MAP = {
+        "480p":  (640, 480),
+        "720p":  (1280, 720),
+        "1080p": (1920, 1080),
+    }
+
+    # Camera source presets: config value → OpenCV device index
+    _SOURCE_MAP = {
+        "builtin":  0,
+        "external": 1,
+    }
+
     def __init__(self, camera_index: int = 0, target_width: int = 640, target_height: int = 480):
-        self._camera_index = camera_index
-        self._target_width = target_width
-        self._target_height = target_height
+        # Read settings from config; fall back to constructor defaults
+        from core.config import config
+        source = config.get("webcam.camera_source", "builtin")
+        self._camera_index = self._SOURCE_MAP.get(source, camera_index)
+
+        resolution = config.get("webcam.resolution", "480p")
+        w, h = self._RESOLUTION_MAP.get(resolution, (target_width, target_height))
+        self._target_width = w
+        self._target_height = h
+
         self._cap = None
         self._is_running = False
         self._last_frame_time = 0

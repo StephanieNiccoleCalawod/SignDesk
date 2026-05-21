@@ -5,14 +5,14 @@ PyQt6 migration — CustomTkinter dependency fully removed.
 
 import os
 from PyQt6.QtWidgets import (
-    QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, 
-    QScrollArea, QLineEdit, QMessageBox, QGridLayout
+    QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
+    QScrollArea, QLineEdit, QMessageBox, QGridLayout, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QCursor
 
 from core.theme import c, is_dark
-from core.ui_helpers import create_nav_item, build_steps_panel, _set_font
+from core.ui_helpers import create_nav_item, build_steps_panel, _set_font, _add_shadow
 
 class GradientSidebar(QFrame):
     """Sidebar with vertical gradient background — respects current theme mode."""
@@ -119,10 +119,10 @@ class DashboardPage(QWidget):
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setSpacing(2)
 
-        nav_layout.addWidget(create_nav_item(sidebar, "📊", "Dashboard", is_active=True))
-        nav_layout.addWidget(create_nav_item(sidebar, "🖐️", "Gesture Translator", command=self._launch_gesture_detection))
-        nav_layout.addWidget(create_nav_item(sidebar, "📖", "Sign Dictionary"))
-        nav_layout.addWidget(create_nav_item(sidebar, "📈", "Gesture History", command=self._launch_gesture_history))
+        nav_layout.addWidget(create_nav_item(sidebar, "■", "Dashboard", is_active=True))
+        nav_layout.addWidget(create_nav_item(sidebar, "◈", "Gesture Translator", command=self._launch_gesture_detection))
+        nav_layout.addWidget(create_nav_item(sidebar, "▣", "Sign Dictionary"))
+        nav_layout.addWidget(create_nav_item(sidebar, "▲", "Gesture History", command=self._launch_gesture_history))
 
         layout.addLayout(nav_layout)
         layout.addStretch()
@@ -138,7 +138,7 @@ class DashboardPage(QWidget):
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(2)
 
-        bottom_layout.addWidget(create_nav_item(sidebar, "⚙️", "Settings", command=self._launch_settings))
+        bottom_layout.addWidget(create_nav_item(sidebar, "◎", "Settings", command=self._launch_settings))
 
         # Custom logout item with red text
         logout_btn = QWidget()
@@ -149,15 +149,10 @@ class DashboardPage(QWidget):
         lo_layout.setContentsMargins(12, 0, 12, 0)
         lo_layout.setSpacing(8)
         
-        lo_icon = QLabel("🚪")
-        lo_icon.setFixedWidth(24)
-        lo_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lo_icon.setStyleSheet("color: #FF8A80; font-family: 'Segoe UI Emoji'; font-size: 14px; background: transparent;")
         lo_text = QLabel("Logout")
-        lo_text.setStyleSheet("color: #FF8A80; background: transparent;")
+        lo_text.setStyleSheet("color: #FF8A80; background: transparent; border: none;")
         _set_font(lo_text, size=12, bold=False)
         
-        lo_layout.addWidget(lo_icon)
         lo_layout.addWidget(lo_text)
         lo_layout.addStretch()
 
@@ -199,8 +194,8 @@ class DashboardPage(QWidget):
         scroll.setWidget(body)
 
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(28, 8, 28, 20)
-        body_layout.setSpacing(20)
+        body_layout.setContentsMargins(28, 12, 28, 24)
+        body_layout.setSpacing(24)
 
         self._build_welcome(body_layout)
         self._build_stats(body_layout)
@@ -222,28 +217,34 @@ class DashboardPage(QWidget):
         layout.setContentsMargins(28, 16, 28, 4)
         
         # Left: greeting
-        greeting = QLabel(f"Welcome back, {self._username} 👋")
-        greeting.setStyleSheet(f"color: {c('text_primary')};")
-        _set_font(greeting, size=16, bold=True)
+        greeting = QLabel(f"Welcome back, {self._username}")
+        greeting.setStyleSheet(f"color: {c('text_primary')}; font-family: 'Segoe UI'; font-size: 22px; font-weight: bold;")
         layout.addWidget(greeting)
         
         layout.addStretch()
 
         # Right: search bar
         search_frame = QFrame()
+        search_frame.setObjectName("searchFrame")
         search_frame.setStyleSheet(f"""
-            QFrame {{
+            QFrame#searchFrame {{
                 background-color: {c('input_bg')};
                 border: 1px solid {c('border')};
                 border-radius: 18px;
             }}
+            QFrame#searchFrame QLabel {{
+                background: transparent;
+                border: none;
+            }}
         """)
         search_frame.setFixedHeight(36)
+        search_frame.setMinimumWidth(200)
+        search_frame.setMaximumWidth(280)
         s_layout = QHBoxLayout(search_frame)
-        s_layout.setContentsMargins(12, 0, 12, 0)
+        s_layout.setContentsMargins(14, 0, 14, 0)
         
-        s_icon = QLabel("🔍")
-        s_icon.setStyleSheet(f"color: {c('text_muted')}; font-family: 'Segoe UI Emoji'; border: none; background: transparent;")
+        s_icon = QLabel("⌕")
+        s_icon.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
         
         s_entry = QLineEdit()
         s_entry.setPlaceholderText("Search...")
@@ -253,13 +254,12 @@ class DashboardPage(QWidget):
                 background: transparent;
                 color: {c('text_primary')};
                 font-family: 'Segoe UI';
-                font-size: 11px;
+                font-size: 12px;
             }}
         """)
-        s_entry.setFixedWidth(160)
         
         s_layout.addWidget(s_icon)
-        s_layout.addWidget(s_entry)
+        s_layout.addWidget(s_entry, stretch=1)
         
         layout.addWidget(search_frame)
         layout.addSpacing(12)
@@ -283,91 +283,128 @@ class DashboardPage(QWidget):
     # ── Welcome Banner ─────────────────────────────────────
 
     def _build_welcome(self, parent_layout):
+        wrapper = QWidget()
+        wrapper.setStyleSheet("background: transparent;")
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(6, 6, 6, 8)
+        wrapper_layout.setSpacing(0)
+
         card = QFrame()
+        card.setObjectName("welcomeCard")
         card.setStyleSheet(f"""
-            QFrame {{
+            QFrame#welcomeCard {{
                 background-color: {c('info_bg')};
                 border: 1px solid #D1C4E9;
                 border-radius: 14px;
+            }}
+            QFrame#welcomeCard QLabel {{
+                background: transparent;
+                border: none;
             }}
         """)
         
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 18, 24, 18)
         
-        title = QLabel(f"Good day, {self._username} 👋")
-        title.setStyleSheet("color: #311B92; border: none; background: transparent;")
-        _set_font(title, size=18, bold=True)
+        title = QLabel(f"Good day, {self._username}")
+        title.setStyleSheet("color: #311B92; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
         
         desc = QLabel("You're successfully signed in to SignDesk. Your dashboard is ready.")
-        desc.setStyleSheet(f"color: {c('info')}; border: none; background: transparent;")
-        _set_font(desc, size=12)
+        desc.setStyleSheet(f"color: {c('info')}; font-family: 'Segoe UI'; font-size: 16px;")
         
         layout.addWidget(title)
         layout.addWidget(desc)
-        
-        parent_layout.addWidget(card)
+
+        _add_shadow(card)
+        wrapper_layout.addWidget(card)
+        parent_layout.addWidget(wrapper)
 
     # ── Stats Row ──────────────────────────────────────────
 
     def _build_stats(self, parent_layout):
+        # Wrapper gives the shadow room to render without clipping
+        wrapper = QWidget()
+        wrapper.setStyleSheet("background: transparent;")
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(6, 6, 6, 8)
+        wrapper_layout.setSpacing(0)
+
         row = QWidget()
+        row.setStyleSheet("background: transparent;")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(14)
 
         stats_data = [
-            ("Sessions today", "3",  "📊"),
-            ("Avg. accuracy",  "91%", "🎯"),
-            ("Signs learned",  "24",  "✋"),
+            ("Sessions today", "3"),
+            ("Avg. accuracy",  "91%"),
+            ("Signs learned",  "24"),
         ]
 
-        for label, value, icon in stats_data:
+        for label, value in stats_data:
             card = QFrame()
+            card.setObjectName("statCard")
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             card.setStyleSheet(f"""
-                QFrame {{
+                QFrame#statCard {{
                     background-color: {c('bg_primary')};
                     border: 1px solid {c('border')};
                     border-radius: 12px;
                 }}
+                QFrame#statCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
             """)
             c_layout = QVBoxLayout(card)
-            c_layout.setContentsMargins(16, 14, 16, 14)
-            c_layout.setSpacing(0)
-            
-            # Icon circle
-            icon_lbl = QLabel(icon)
-            icon_lbl.setFixedSize(32, 32)
-            icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon_lbl.setStyleSheet("""
-                QLabel {
-                    background-color: #EDE7F6;
-                    border-radius: 16px;
-                    font-family: 'Segoe UI Emoji';
-                    font-size: 12px;
-                    border: none;
-                }
-            """)
-            
-            lbl = QLabel(label)
-            lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
-            _set_font(lbl, size=11)
-            
-            val = QLabel(value)
-            val.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
-            _set_font(val, size=22, bold=True)
-            
-            c_layout.addWidget(icon_lbl)
-            c_layout.addSpacing(6)
-            c_layout.addWidget(lbl)
-            c_layout.addSpacing(2)
-            c_layout.addWidget(val)
-            
-            layout.addWidget(card)
-            
-        parent_layout.addWidget(row)
+            c_layout.setContentsMargins(20, 16, 20, 16)
+            c_layout.setSpacing(4)
 
-    # ── Module Cards ───────────────────────────────────────
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"color: {c('text_primary')};")
+            _set_font(lbl, size=11)
+
+            val = QLabel(value)
+            val.setStyleSheet(f"color: {c('text_primary')};")
+            _set_font(val, size=22, bold=True)
+
+            c_layout.addWidget(lbl)
+            c_layout.addWidget(val)
+
+            _add_shadow(card)
+            layout.addWidget(card, stretch=1)
+
+        wrapper_layout.addWidget(row)
+        parent_layout.addWidget(wrapper)
+
+    def _history_status(self) -> str:
+        """Return a short string describing the gesture history log status."""
+        try:
+            from modules.gesture_history.backend import get_setting, get_record_count
+            from core.database import get_connection
+
+            logging_on = get_setting("logging_enabled") == "1"
+            if not logging_on:
+                return "Disabled"
+
+            # Resolve user_id from username
+            user_id = None
+            try:
+                with get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT id FROM users WHERE username = ?", (self._username,)
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        user_id = row["id"]
+            except Exception:
+                pass
+
+            count = get_record_count(user_id) if user_id is not None else 0
+            return f"{count} entr{'y' if count == 1 else 'ies'}"
+        except Exception:
+            return "Unavailable"
 
     def _build_status(self, parent_layout):
         lbl = QLabel("System Status")
@@ -375,61 +412,73 @@ class DashboardPage(QWidget):
         _set_font(lbl, size=13, bold=True)
         parent_layout.addWidget(lbl)
 
+        # Wrapper gives the shadow room to render without clipping
+        wrapper = QWidget()
+        wrapper.setStyleSheet("background: transparent;")
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(6, 6, 6, 8)
+        wrapper_layout.setSpacing(0)
+
         row = QWidget()
+        row.setStyleSheet("background: transparent;")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(14)
 
-        # Re-resolve colors using theme indices where possible, or fallback
         status_items = [
-            ("📷", "Camera",       "Ready",         c('info_bg'),  c('info')),
-            ("🔒", "Privacy Mode", "Local-only",    "#E8F5E9",        "#2E7D32"),
-            ("📈", "History Log",  self._history_status(), c('badge_gray_bg'),  c('badge_gray_fg')),
+            ("Camera",       "Ready",      c('info_bg'),       c('info')),
+            ("Privacy Mode", "Local-only", "#E8F5E9",          "#2E7D32"),
+            ("History Log",  self._history_status(), c('badge_gray_bg'), c('badge_gray_fg')),
         ]
 
-        for icon, title, value, bg, fg in status_items:
+        for title, value, bg, fg in status_items:
             card = QFrame()
+            card.setObjectName("statusCard")
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             card.setStyleSheet(f"""
-                QFrame {{
+                QFrame#statusCard {{
                     background-color: {c('bg_primary')};
                     border: 1px solid {c('border')};
                     border-radius: 12px;
                 }}
+                QFrame#statusCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
             """)
             c_layout = QVBoxLayout(card)
-            c_layout.setContentsMargins(16, 14, 16, 14)
-            
-            icon_lbl = QLabel(icon)
-            icon_lbl.setFixedSize(32, 32)
-            icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon_lbl.setStyleSheet(f"background-color: {bg}; border-radius: 10px; font-family: 'Segoe UI Emoji'; font-size: 13px; border: none;")
-            
+            c_layout.setContentsMargins(20, 16, 20, 16)
+            c_layout.setSpacing(6)
+
             t_lbl = QLabel(title)
-            t_lbl.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+            t_lbl.setStyleSheet(f"color: {c('text_primary')};")
             _set_font(t_lbl, size=11)
-            
+
+            # Badge — use a QWidget container so QFrame/QLabel global rules can't interfere
+            badge_container = QWidget()
+            badge_container.setFixedHeight(28)
+            badge_container.setStyleSheet(f"""
+                background-color: {bg};
+                border-radius: 8px;
+                border: none;
+            """)
+            badge_layout = QHBoxLayout(badge_container)
+            badge_layout.setContentsMargins(14, 0, 14, 0)
+
             v_lbl = QLabel(value)
             v_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            v_lbl.setStyleSheet(f"background-color: {bg}; color: {fg}; border-radius: 10px; padding: 3px 10px; font-weight: bold; font-family: 'Segoe UI'; font-size: 11px; border: none;")
-            
-            c_layout.addWidget(icon_lbl)
+            v_lbl.setStyleSheet(f"color: {fg}; background: transparent; border: none;")
+            _set_font(v_lbl, size=11, bold=True)
+            badge_layout.addWidget(v_lbl)
+
             c_layout.addWidget(t_lbl)
-            c_layout.addWidget(v_lbl, 0, Qt.AlignmentFlag.AlignLeft)
-            
-            layout.addWidget(card)
-            
-        parent_layout.addWidget(row)
+            c_layout.addWidget(badge_container, 0, Qt.AlignmentFlag.AlignLeft)
 
-    def _history_status(self) -> str:
-        """Returns a short label for history logging state."""
-        try:
-            from core.config import config
-            enabled = config.get("privacy.gesture_history_log", False)
-            return "Enabled" if enabled else "Disabled"
-        except Exception:
-            return "Unknown"
+            _add_shadow(card)
+            layout.addWidget(card, stretch=1)
 
-    # ── How-to-Use Cards ───────────────────────────────────
+        wrapper_layout.addWidget(row)
+        parent_layout.addWidget(wrapper)
 
     def _build_how_to_use(self, parent_layout):
         steps = [
@@ -454,7 +503,7 @@ class DashboardPage(QWidget):
                 "The translation will appear in the result panel on the right.",
             ),
         ]
-        panel = build_steps_panel(self, steps, card_width=120)
+        panel = build_steps_panel(self, steps, card_width=155)
         parent_layout.addWidget(panel)
 
     # ── Footer ─────────────────────────────────────────────

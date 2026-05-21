@@ -192,8 +192,8 @@ def make_left_panel() -> QFrame:
         )
         logo_lbl.setPixmap(px)
     else:
-        logo_lbl.setText("🤟")
-        logo_lbl.setStyleSheet("font-size: 48px; background: transparent; border: none;")
+        logo_lbl.setText("SD")
+        logo_lbl.setStyleSheet("font-size: 24px; font-weight: bold; color: #6C63FF; background: transparent; border: none;")
     layout.addWidget(logo_lbl)
     layout.addSpacing(16)
 
@@ -588,11 +588,26 @@ class RegisterPage(QWidget):
     # ── submit ────────────────────────────────────────────────────────
 
     def _on_submit(self):
-        username = self._uname_entry.text().strip()
-        email    = self._email_entry.text().strip()
+        from core.validators import sanitize_username, sanitize_input, registration_limiter
+
+        username = sanitize_username(self._uname_entry.text())
+        email    = sanitize_input(self._email_entry.text()).lower()
         password = self._pass_entry.text().strip()
         confirm  = self._confirm_entry.text().strip()
 
+        # ── Rate limiting: max 5 attempts per email per 5 minutes ──
+        allowed, wait = registration_limiter.is_allowed(email)
+        if not allowed:
+            mins = wait // 60
+            secs = wait % 60
+            QMessageBox.warning(
+                self, "Too Many Attempts",
+                f"Too many registration attempts for this email.\n"
+                f"Please wait {mins}m {secs}s before trying again."
+            )
+            return
+
+        # ── Validate (format + MX record + strength) ──
         errors = validate_registration(username, email, password, confirm)
         if errors:
             QMessageBox.critical(self, "Validation Error",

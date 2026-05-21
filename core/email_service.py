@@ -130,7 +130,7 @@ def send_verification_email(to_email: str, otp_code: str) -> tuple[bool, str]:
 
     except smtplib.SMTPException as e:
         print(f"[OTP] SMTP error: {e}")
-        return False, f"SMTP error: {str(e)}"
+        return False, "Failed to send verification email. Please try again later."
 
     except TimeoutError as e:
         print(f"[OTP] Timeout: {e}")
@@ -138,7 +138,7 @@ def send_verification_email(to_email: str, otp_code: str) -> tuple[bool, str]:
 
     except Exception as e:
         print(f"[OTP] Unexpected error: {e}")
-        return False, f"Unexpected error: {str(e)}"
+        return False, "An unexpected error occurred while sending the email. Please try again."
 
 
 # ──────────────────────────────────────────────────────────────

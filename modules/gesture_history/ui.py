@@ -172,8 +172,8 @@ class GestureHistorySection(QWidget):
         s_layout = QHBoxLayout(search_wrap)
         s_layout.setContentsMargins(10, 0, 10, 0)
         
-        s_icon = QLabel("🔍")
-        s_icon.setStyleSheet(f"color: {c('text_muted')}; font-family: 'Segoe UI Emoji'; border: none; background: transparent;")
+        s_icon = QLabel("⌕")
+        s_icon.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
         
         self._filter_var = QLineEdit()
         self._filter_var.setPlaceholderText("Search gesture or translation…")
@@ -433,8 +433,8 @@ class GestureHistorySection(QWidget):
         layout.setContentsMargins(0, 50, 0, 50)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        icon = QLabel("📭")
-        icon.setStyleSheet("font-family: 'Segoe UI Emoji'; font-size: 36px; background: transparent; border: none;")
+        icon = QLabel("—")
+        icon.setStyleSheet("font-size: 36px; background: transparent; border: none; color: #9CA3AF;")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon)
 
@@ -493,13 +493,20 @@ class GestureHistorySection(QWidget):
         _set_font(lbl_idx, size=11)
         layout.addWidget(lbl_idx)
 
-        # Gesture letter badge
+        # Gesture letter badge — wrap in a 70px container to match the column header
         g_char = gesture[0].upper() if gesture else "?"
         g_badge = QLabel(g_char)
         g_badge.setFixedSize(32, 32)
         g_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         g_badge.setStyleSheet(f"background-color: {_PURPLE_BG}; color: {_PURPLE_FG}; border-radius: 8px; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px;")
-        layout.addWidget(g_badge)
+
+        g_wrap = QWidget()
+        g_wrap.setFixedWidth(70)
+        gw_layout = QHBoxLayout(g_wrap)
+        gw_layout.setContentsMargins(0, 0, 0, 0)
+        gw_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        gw_layout.addWidget(g_badge)
+        layout.addWidget(g_wrap)
 
         # Translated text
         lbl_trans = QLabel(translated)
@@ -625,7 +632,8 @@ class GestureHistorySection(QWidget):
                     ])
             self._show_feedback(f"✓ Exported {len(rows)} records to CSV.")
         except Exception as e:
-            QMessageBox.critical(self, "Export failed", str(e))
+            print(f"[history] CSV export error: {e}")
+            QMessageBox.critical(self, "Export failed", "Could not export the file. Please check the file path and try again.")
 
     # ── Feedback ─────────────────────────────────────────────────────────────
 

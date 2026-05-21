@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QScrollArea, QMessageBox, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPixmap, QCursor
+from PyQt6.QtGui import QPixmap, QCursor, QPainter, QLinearGradient, QColor
 
 from core.theme import c
 from core.ui_helpers import _set_font
@@ -31,6 +31,23 @@ C_GREEN_BG   = "#d1fae5"
 C_GREEN_FG   = "#1D9E75"
 C_YELLOW_BG  = "#fef3c7"
 C_YELLOW_FG  = "#b45309"
+
+
+class _GradientSidebar(QFrame):
+    """Sidebar with vertical gradient background."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(210)
+
+    def paintEvent(self, event):
+        from core.theme import is_dark
+        dark = is_dark()
+        painter = QPainter(self)
+        grad = QLinearGradient(0, 0, 0, self.height())
+        grad.setColorAt(0, QColor(c("panel_left", dark=dark)))
+        grad.setColorAt(1, QColor(c("panel_left_end", dark=dark)))
+        painter.fillRect(self.rect(), grad)
+
 
 def _fmt_datetime(iso: str) -> tuple[str, str]:
     """Return (date_str, time_str) from ISO timestamp."""
@@ -69,22 +86,33 @@ class GestureLogViewerPage(QWidget):
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._build_navbar(layout)
+        self._build_sidebar(layout)
         self._build_body(layout)
 
-    def _build_navbar(self, parent_layout):
-        navbar = QFrame()
-        navbar.setFixedHeight(60)
-        navbar.setStyleSheet(f"background-color: {c('panel_left', dark=True)}; border: none;")
-        
-        layout = QHBoxLayout(navbar)
-        layout.setContentsMargins(20, 0, 20, 0)
+    def _build_sidebar(self, parent_layout):
+        from core.theme import is_dark
+        dark = is_dark()
 
-        # Logo
+        title_col   = "#FFFFFF" if dark else "#2C3358"
+        divider_col = "#4A4590" if dark else c("border")
+        hover_col   = "#3D4470" if dark else "#D6D3E8"
+
+        sidebar = _GradientSidebar(self)
+        parent_layout.addWidget(sidebar)
+
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(16, 24, 16, 20)
+        layout.setSpacing(0)
+
+        # Logo + brand
+        brand = QHBoxLayout()
+        brand.setSpacing(10)
+        brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
         logo_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "assets", "logo.png"
@@ -92,58 +120,72 @@ class GestureLogViewerPage(QWidget):
         if os.path.exists(logo_path):
             logo_lbl = QLabel()
             pixmap = QPixmap(logo_path).scaled(
-                36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+                36, 36, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
             )
             logo_lbl.setPixmap(pixmap)
             logo_lbl.setStyleSheet("background: transparent;")
-            layout.addWidget(logo_lbl)
-            layout.addSpacing(10)
+            brand.addWidget(logo_lbl)
 
         title = QLabel("SignDesk")
-        title.setStyleSheet("font-family: 'Georgia'; font-size: 18px; font-weight: bold; color: #FFFFFF; background: transparent;")
-        layout.addWidget(title)
+        title.setStyleSheet(f"color: {title_col}; background: transparent;")
+        _set_font(title, 16, bold=True)
+        brand.addWidget(title)
+        layout.addLayout(brand)
 
-        layout.addStretch()
+        # Divider
+        layout.addSpacing(16)
+        div1 = QFrame()
+        div1.setFixedHeight(1)
+        div1.setStyleSheet(f"background-color: {divider_col}; border: none;")
+        layout.addWidget(div1)
+        layout.addSpacing(16)
 
-        # Buttons
-        btn_back = QPushButton("← Back to Settings")
+        # Back to Settings — accent pill button
+        btn_back = QPushButton("←  Back to Settings")
+        btn_back.setFixedHeight(36)
         btn_back.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        btn_back.setFixedSize(140, 32)
         btn_back.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
+                background-color: #495086;
                 color: #FFFFFF;
-                border: 1px solid #FFFFFF;
-                border-radius: 6px;
+                border: none;
+                border-radius: 18px;
                 font-family: 'Segoe UI';
-                font-size: 11px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 0px 16px;
+                text-align: center;
             }}
             QPushButton:hover {{
-                background-color: {c('panel_left_end', dark=True)};
+                background-color: #3F4678;
             }}
         """)
         btn_back.clicked.connect(self._on_back)
         layout.addWidget(btn_back)
 
+        layout.addStretch()
+
+        # Bottom: divider + logout
+        div2 = QFrame()
+        div2.setFixedHeight(1)
+        div2.setStyleSheet(f"background-color: {divider_col}; border: none;")
+        layout.addWidget(div2)
         layout.addSpacing(8)
 
-        btn_logout = QPushButton("Logout →")
-        btn_logout.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        btn_logout.setFixedSize(90, 32)
-        btn_logout.setStyleSheet(f"""
+        logout_btn = QPushButton("→  Logout")
+        logout_btn.setFixedHeight(38)
+        logout_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        logout_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {c('error')};
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                font-family: 'Segoe UI';
-                font-size: 11px;
+                background: transparent; color: #FF8A80; text-align: left;
+                padding-left: 12px; border-radius: 10px;
+                font-family: 'Segoe UI'; font-size: 13px; font-weight: bold;
             }}
+            QPushButton:hover {{ background-color: {hover_col}; }}
         """)
-        btn_logout.clicked.connect(self._on_logout)
-        layout.addWidget(btn_logout)
-
-        parent_layout.addWidget(navbar)
+        logout_btn.clicked.connect(self._on_logout)
+        layout.addWidget(logout_btn)
 
     def _build_body(self, parent_layout):
         body = QWidget()
@@ -197,8 +239,8 @@ class GestureLogViewerPage(QWidget):
         s_layout = QHBoxLayout(search_wrap)
         s_layout.setContentsMargins(10, 0, 10, 0)
         
-        s_icon = QLabel("🔍")
-        s_icon.setStyleSheet(f"color: {c('text_muted')}; font-family: 'Segoe UI Emoji'; border: none; background: transparent;")
+        s_icon = QLabel("⌕")
+        s_icon.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
         
         self._filter_var = QLineEdit()
         self._filter_var.setPlaceholderText("Filter by gesture or text…")
@@ -514,7 +556,8 @@ class GestureLogViewerPage(QWidget):
                     ])
             self._show_feedback(f"✓ Exported {len(rows)} records to CSV.")
         except Exception as e:
-            QMessageBox.critical(self, "Export failed", str(e))
+            print(f"[history] CSV export error: {e}")
+            QMessageBox.critical(self, "Export failed", "Could not export the file. Please check the file path and try again.")
 
     def _on_back(self):
         if hasattr(self._app, 'show_settings'):

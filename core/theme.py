@@ -67,8 +67,8 @@ COLORS = {
     "bg_primary":    ("#FFFFFF", "#141416"),   # Main cards & panels
     "bg_secondary":  ("#F3F1F8", "#0A0A0B"),   # Window background
 
-    "panel_left":     ("#EEF0FB", "#1A1A1E"),  # Sidebar bg
-    "panel_left_end": ("#D8D5F7", "#282836"),  # Sidebar gradient end
+    "panel_left":     ("#DDD9F2", "#1A1A1E"),  # Sidebar bg
+    "panel_left_end": ("#C9C4E8", "#282836"),  # Sidebar gradient end
 
     "text_primary":   ("#1F1F1F", "#F1F1F5"),  # Headings, active text
     "text_secondary": ("#6B7280", "#9CA3AF"),   # Subtitles
@@ -279,12 +279,11 @@ def build_qss(dark: bool = False) -> str:
             font-size: 13px;
         }}
 
-        /* ── Frames / cards ── */
-        QFrame {{
-            background-color: {card};
-            border: 1px solid {border};
-            border-radius: 8px;
-        }}
+        /* ── NOTE: No global QFrame rule ──
+         * QLabel inherits QFrame, so a blanket QFrame {{}} rule
+         * gives every label a white background + border, hiding text.
+         * Cards set their own styles via objectName selectors instead.
+         */
 
         /* ── Inputs ── */
         QLineEdit, QTextEdit, QPlainTextEdit {{
@@ -299,12 +298,12 @@ def build_qss(dark: bool = False) -> str:
             border: 1px solid {accent};
         }}
 
-        /* ── Buttons (base — individual pill/outline styles override) ── */
+        /* ── Buttons (base — pill shape; widget setStyleSheet overrides border-radius) ── */
         QPushButton {{
             background-color: {accent};
             color: #FFFFFF;
             border: none;
-            border-radius: 8px;
+            border-radius: 9999px;
             padding: 6px 16px;
             font-weight: bold;
         }}

@@ -15,7 +15,7 @@ from PyQt6.QtGui import QPixmap, QCursor, QColor
 
 from core.theme import c
 from core.config import config
-from core.ui_helpers import _set_font
+from core.ui_helpers import _set_font, ToggleSwitch
 
 # ══════════════════════════════════════════════════════════════
 # CONSTANTS
@@ -23,18 +23,41 @@ from core.ui_helpers import _set_font
 
 SIDEBAR_W   = 220
 SECTION_IDS = [
-    ("account",       "Account",              "👤"),
-    ("appearance",    "Appearance",            "🎨"),
-    ("gesture",       "Gesture Recognition",   "🤟"),
-    ("speech",        "Speech Output",         "🔊"),
-    ("privacy",       "Privacy & Data",        "🔒"),
-    ("accessibility", "Accessibility",         "♿"),
-    ("webcam",        "Webcam",                "📷"),
-    ("about",         "About & Support",       "ℹ️"),
+    ("account",      "Account"),
+    ("recognition",  "Recognition & Translation"),
+    ("interface",    "Interface & Accessibility"),
+    ("privacy",      "Privacy & Data"),
+    ("about",        "About & Support"),
 ]
 
 # Consistent dark-card colours
 _ROW_BORDER  = ("#F1F5F9", "#1E1E28")
+
+# Default values per section — used by "Reset to defaults"
+_SECTION_DEFAULTS: dict = {
+    "recognition": {
+        "gesture.confidence_threshold":        60,
+        "gesture.timeout":                     2.0,
+        "gesture.show_confidence_indicator":   True,
+        "speech.tts_enabled":                  False,
+        "speech.voice":                        "default",
+        "speech.rate":                         1.0,
+        "speech.volume":                       100,
+        "webcam.auto_start_on_launch":         False,
+        "webcam.camera_source":                "builtin",
+        "webcam.resolution":                   "720p",
+    },
+    "interface": {
+        "appearance.theme":                    "system",
+        "appearance.font_size":                "medium",
+        "appearance.show_landmark_overlay":    False,
+        "accessibility.screen_reader_support": False,
+    },
+    "privacy": {
+        "privacy.gesture_history_log":         False,
+    },
+    "account": {},  # account rows are user-specific, not resettable
+}
 
 class SettingsPage(QWidget):
     def __init__(self, parent, app, username: str):
@@ -70,7 +93,7 @@ class SettingsPage(QWidget):
         parent_layout.addWidget(sidebar)
 
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(0, 24, 0, 20)
+        layout.setContentsMargins(16, 24, 16, 20)
         layout.setSpacing(0)
 
         # Brand
@@ -78,8 +101,8 @@ class SettingsPage(QWidget):
         brand_layout.setContentsMargins(16, 0, 16, 4)
         brand_layout.setSpacing(8)
 
-        icon_lbl = QLabel("🤟")
-        icon_lbl.setStyleSheet("font-family: 'Segoe UI Emoji'; font-size: 20px; border: none;")
+        icon_lbl = QLabel("SD")
+        icon_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {c('accent')}; border: none; background: transparent;")
         brand_layout.addWidget(icon_lbl)
 
         title_lbl = QLabel("SignDesk")
@@ -97,24 +120,26 @@ class SettingsPage(QWidget):
         
         layout.addSpacing(12)
 
-        # Back to Dashboard
-        btn_back = QPushButton("← Dashboard")
+        # Back to Dashboard — accent pill button
+        btn_back = QPushButton("←  Back to Dashboard")
+        btn_back.setFixedHeight(36)
         btn_back.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_back.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
-                color: {c('accent')};
+                background-color: #495086;
+                color: #FFFFFF;
                 border: none;
-                text-align: left;
-                padding-left: 16px;
+                border-radius: 18px;
                 font-family: 'Segoe UI';
-                font-size: 11px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 0px 16px;
+                text-align: center;
             }}
             QPushButton:hover {{
-                background-color: {c('input_bg')};
+                background-color: #3F4678;
             }}
         """)
-        btn_back.setFixedHeight(28)
         btn_back.clicked.connect(self._on_back)
         layout.addWidget(btn_back)
 
@@ -126,30 +151,25 @@ class SettingsPage(QWidget):
         nav_layout.setContentsMargins(12, 0, 12, 0)
         nav_layout.setSpacing(1)
 
-        for sid, label, icon in SECTION_IDS:
+        for sid, label in SECTION_IDS:
             btn = QPushButton()
             btn.setFixedHeight(38)
             btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             btn.setStyleSheet("background: transparent; border: none; border-radius: 8px;")
             
             b_layout = QHBoxLayout(btn)
-            b_layout.setContentsMargins(4, 0, 4, 0)
+            b_layout.setContentsMargins(16, 0, 4, 0)
             b_layout.setSpacing(8)
             
             bar = QFrame()
             bar.setFixedSize(3, 20)
             bar.setStyleSheet("background: transparent; border-radius: 1px;")
             
-            i_lbl = QLabel(icon)
-            i_lbl.setStyleSheet("font-family: 'Segoe UI Emoji'; font-size: 14px; border: none; background: transparent;")
-            i_lbl.setFixedWidth(24)
-            
             t_lbl = QLabel(label)
             t_lbl.setStyleSheet(f"color: {c('text_secondary')}; border: none; background: transparent;")
             _set_font(t_lbl, size=13)
             
             b_layout.addWidget(bar)
-            b_layout.addWidget(i_lbl)
             b_layout.addWidget(t_lbl)
             b_layout.addStretch()
 
@@ -176,14 +196,11 @@ class SettingsPage(QWidget):
         self._section_indices = {}
 
         builders = {
-            "account":       self._build_account,
-            "appearance":    self._build_appearance,
-            "gesture":       self._build_gesture,
-            "speech":        self._build_speech,
-            "privacy":       self._build_privacy,
-            "accessibility": self._build_accessibility,
-            "webcam":        self._build_webcam,
-            "about":         self._build_about,
+            "account":      self._build_account,
+            "recognition":  self._build_recognition,
+            "interface":    self._build_interface,
+            "privacy":      self._build_privacy,
+            "about":        self._build_about,
         }
 
         for i, (sid, builder) in enumerate(builders.items()):
@@ -249,13 +266,45 @@ class SettingsPage(QWidget):
         parent_layout.addWidget(lbl)
         parent_layout.addSpacing(8)
 
+    def _panel_title(self, parent_layout, text):
+        """Large heading for a consolidated settings panel."""
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
+        _set_font(lbl, size=16, bold=True)
+        parent_layout.addWidget(lbl)
+        parent_layout.addSpacing(16)
+
     def _card(self, parent_layout) -> QVBoxLayout:
         c_frame = QFrame()
+        c_frame.setObjectName("settingsCard")
         c_frame.setStyleSheet(f"""
-            QFrame {{
+            QFrame#settingsCard {{
                 background-color: {c('bg_primary')};
                 border: 1px solid {c('border')};
                 border-radius: 14px;
+            }}
+            QFrame#settingsCard QLabel {{
+                background: transparent;
+                border: none;
+                border-radius: 0px;
+            }}
+            QFrame#settingsCard QFrame {{
+                border: none;
+                background: transparent;
+                border-radius: 0px;
+            }}
+            QFrame#settingsCard QPushButton {{
+                background-color: {c('accent')};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 9999px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                font-weight: bold;
+                padding: 0px 14px;
+            }}
+            QFrame#settingsCard QPushButton:hover {{
+                background-color: {c('accent_hover')};
             }}
         """)
         layout = QVBoxLayout(c_frame)
@@ -267,8 +316,9 @@ class SettingsPage(QWidget):
 
     def _row_divider(self, parent_layout):
         div = QFrame()
+        div.setObjectName("rowDivider")
         div.setFixedHeight(1)
-        div.setStyleSheet(f"background-color: {c('border')}; border: none;")
+        div.setStyleSheet(f"QFrame#rowDivider {{ background-color: {c('border')}; border: none; border-radius: 0px; }}")
         parent_layout.addWidget(div)
 
     def _row(self, parent_layout, label, desc=None, danger=False):
@@ -306,25 +356,17 @@ class SettingsPage(QWidget):
     def _toggle_row(self, parent_layout, label, desc, key, disabled=False, on_change=None):
         right_layout = self._row(parent_layout, label, desc)
 
-        cb = QCheckBox()
-        cb.setChecked(config.get(key, False))
-        cb.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        # Style like a toggle switch
-        cb.setStyleSheet(f"""
-            QCheckBox::indicator {{ width: 44px; height: 22px; }}
-            QCheckBox::indicator:unchecked {{ background-color: {c('border')}; border-radius: 11px; }}
-            QCheckBox::indicator:checked {{ background-color: {c('accent')}; border-radius: 11px; }}
-        """)
+        toggle = ToggleSwitch(checked=config.get(key, False))
         if disabled:
-            cb.setEnabled(False)
+            toggle.setEnabled(False)
             
-        def _on_toggle(state):
-            config.set(key, bool(state))
+        def _on_toggle(checked):
+            config.set(key, checked)
             if on_change:
-                on_change(bool(state))
+                on_change(checked)
             
-        cb.stateChanged.connect(_on_toggle)
-        right_layout.addWidget(cb)
+        toggle.toggled.connect(_on_toggle)
+        right_layout.addWidget(toggle)
         
         self._row_divider(parent_layout)
 
@@ -439,23 +481,191 @@ class SettingsPage(QWidget):
         self._row_divider(parent_layout)
 
     def _badge(self, parent_layout, text, color="blue"):
-        # map color string to theme bg/fg roughly
-        bg = "#EFF6FF"
-        fg = "#2563EB"
-        if color == "amber":
-            bg = "#FFFBEB"
-            fg = "#B45309"
-        elif color == "green":
-            bg = "#F0FDF4"
-            fg = "#15803D"
-        elif color == "purple":
-            bg = "#F5F3FF"
-            fg = "#7C3AED"
-            
+        # Theme-aware badge colours (light, dark)
+        badge_colors = {
+            "blue":   (c('info_bg'),      c('info')),
+            "amber":  (c('warn_bg'),      c('warn')),
+            "green":  (c('success_bg'),   c('success')),
+            "purple": (c('badge_gray_bg'), "#7C3AED"),
+        }
+        bg, fg = badge_colors.get(color, badge_colors["blue"])
+
         lbl = QLabel(text)
         lbl.setStyleSheet(f"background-color: {bg}; color: {fg}; border-radius: 6px; padding: 2px 8px; font-family: 'Segoe UI'; font-size: 10px; font-weight: bold;")
         parent_layout.addWidget(lbl)
         return lbl
+
+    # ══════════════════════════════════════════════════════
+    # STYLED DIALOGS  (replaces plain QMessageBox)
+    # ══════════════════════════════════════════════════════
+
+    def _confirm_dialog(self, title: str, message: str,
+                        confirm_text: str = "Yes",
+                        cancel_text:  str = "No",
+                        danger: bool = False) -> bool:
+        """
+        Themed confirmation dialog.  Returns True when the user clicks
+        the confirm button, False for cancel / close.
+        """
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setFixedWidth(400)
+        dlg.setStyleSheet(f"background-color: {c('bg_primary')};")
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(28, 24, 28, 20)
+        layout.setSpacing(0)
+
+        # Title
+        t_lbl = QLabel(title)
+        t_lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
+        _set_font(t_lbl, size=15, bold=True)
+        layout.addWidget(t_lbl)
+        layout.addSpacing(12)
+
+        # Message (supports newlines)
+        for line in message.split("\n"):
+            if not line.strip():
+                layout.addSpacing(6)
+                continue
+            m_lbl = QLabel(line)
+            m_lbl.setWordWrap(True)
+            m_lbl.setStyleSheet(f"color: {c('text_secondary')}; border: none; background: transparent;")
+            _set_font(m_lbl, size=12)
+            layout.addWidget(m_lbl)
+
+        layout.addSpacing(24)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton(cancel_text)
+        cancel_btn.setFixedSize(90, 36)
+        cancel_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {c('text_secondary')};
+                border: 1px solid {c('border')};
+                border-radius: 18px;
+                font-family: 'Segoe UI';
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: {c('input_bg')};
+            }}
+        """)
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_row.addWidget(cancel_btn)
+
+        confirm_color = c('error') if danger else c('accent')
+        confirm_hover  = "#C0392B"  if danger else c('accent_hover')
+        confirm_btn = QPushButton(confirm_text)
+        confirm_btn.setFixedSize(90, 36)
+        confirm_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        confirm_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {confirm_color};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 18px;
+                font-family: 'Segoe UI';
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {confirm_hover};
+            }}
+        """)
+        confirm_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(confirm_btn)
+
+        layout.addLayout(btn_row)
+
+        return dlg.exec() == QDialog.DialogCode.Accepted
+
+    def _alert_dialog(self, title: str, message: str, kind: str = "info") -> None:
+        """
+        Themed alert dialog (info / success / error).
+        kind: 'info' | 'success' | 'error'
+        """
+        color_map = {
+            "info":    c('text_primary'),
+            "success": c('success'),
+            "error":   c('error'),
+        }
+        text_color = color_map.get(kind, c('text_primary'))
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setFixedWidth(380)
+        dlg.setStyleSheet(f"background-color: {c('bg_primary')};")
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(28, 24, 28, 20)
+        layout.setSpacing(0)
+
+        t_lbl = QLabel(title)
+        t_lbl.setStyleSheet(f"color: {text_color}; border: none; background: transparent;")
+        _set_font(t_lbl, size=15, bold=True)
+        layout.addWidget(t_lbl)
+        layout.addSpacing(12)
+
+        for line in message.split("\n"):
+            if not line.strip():
+                layout.addSpacing(6)
+                continue
+            m_lbl = QLabel(line)
+            m_lbl.setWordWrap(True)
+            m_lbl.setStyleSheet(f"color: {c('text_secondary')}; border: none; background: transparent;")
+            _set_font(m_lbl, size=12)
+            layout.addWidget(m_lbl)
+
+        layout.addSpacing(24)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedSize(90, 36)
+        ok_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('accent')};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 18px;
+                font-family: 'Segoe UI';
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {c('accent_hover')};
+            }}
+        """)
+        ok_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+
+        dlg.exec()
+
+    # ══════════════════════════════════════════════════════
+    # CONSOLIDATED PANELS
+    # ══════════════════════════════════════════════════════
+
+    def _build_recognition(self, parent_layout):
+        """Consolidated panel: Gesture Recognition + Speech Output + Webcam."""
+        self._panel_title(parent_layout, "Recognition & Translation")
+        self._build_gesture(parent_layout)
+        self._build_speech(parent_layout)
+        self._build_webcam(parent_layout)
+
+    def _build_interface(self, parent_layout):
+        """Consolidated panel: Appearance + Accessibility."""
+        self._panel_title(parent_layout, "Interface & Accessibility")
+        self._build_appearance(parent_layout)
+        self._build_accessibility(parent_layout)
 
     # ══════════════════════════════════════════════════════
     # SECTION: ACCOUNT
@@ -515,17 +725,20 @@ class SettingsPage(QWidget):
         # Change password
         pw_right = self._row(card, "Change password", "Keep your account secure")
         pw_btn = QPushButton("Change")
-        pw_btn.setFixedSize(80, 30)
+        pw_btn.setFixedSize(80, 28)
         pw_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         pw_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {c('input_bg')};
-                color: {c('accent')};
+                background-color: {c('accent')};
+                color: #FFFFFF;
                 border: none;
-                border-radius: 8px;
+                border-radius: 14px;
                 font-family: 'Segoe UI';
                 font-size: 12px;
                 font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {c('accent_hover')};
             }}
         """)
         pw_btn.clicked.connect(self._on_change_password)
@@ -554,9 +767,22 @@ class SettingsPage(QWidget):
         t_layout.addLayout(left, stretch=1)
         
         edit_btn = QPushButton("Edit")
-        edit_btn.setFixedSize(70, 30)
+        edit_btn.setFixedSize(70, 28)
         edit_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        edit_btn.setStyleSheet(f"background-color: {c('input_bg')}; color: {c('accent')}; border: none; border-radius: 8px; font-weight: bold;")
+        edit_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('accent')};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 14px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {c('accent_hover')};
+            }}
+        """)
         t_layout.addWidget(edit_btn)
         
         c_layout.addWidget(top)
@@ -579,34 +805,48 @@ class SettingsPage(QWidget):
         e_layout.addWidget(entry, stretch=1)
         
         save_btn = QPushButton("Save")
-        save_btn.setFixedSize(70, 36)
+        save_btn.setFixedSize(70, 34)
         save_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        save_btn.setStyleSheet(f"background-color: {c('accent')}; color: #FFFFFF; border: none; border-radius: 8px; font-weight: bold;")
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('accent')};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 17px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {c('accent_hover')};
+            }}
+        """)
         e_layout.addWidget(save_btn)
         
         c_layout.addWidget(edit_frame)
         edit_frame.hide()
         
-        is_editing = [False]
+        state = {"editing": False, "value": current_value}
         
         def _do_save():
             new_val = entry.text().strip()
             if new_val:
                 on_save(new_val)
+                state["value"] = new_val  # update so Cancel shows latest saved value
             _toggle_edit()
             
         save_btn.clicked.connect(_do_save)
         
         def _toggle_edit():
-            is_editing[0] = not is_editing[0]
-            if is_editing[0]:
+            state["editing"] = not state["editing"]
+            if state["editing"]:
                 edit_btn.setText("Cancel")
                 edit_frame.show()
                 entry.setFocus()
             else:
                 edit_btn.setText("Edit")
                 edit_frame.hide()
-                entry.setText(current_value)
+                entry.setText(state["value"])
                 
         edit_btn.clicked.connect(_toggle_edit)
         
@@ -616,7 +856,7 @@ class SettingsPage(QWidget):
     def _save_email(self, new_email):
         from modules.settings.account_backend import update_email
         if not hasattr(self, '_session') or not self._session.is_logged_in:
-            QMessageBox.critical(self, "Error", "Session not available.")
+            self._alert_dialog("Error", "Session not available.", kind="error")
             return
 
         password, ok = QInputDialog.getText(self, "Verify Identity", "Enter your current password to verify:", QLineEdit.EchoMode.Password)
@@ -629,12 +869,12 @@ class SettingsPage(QWidget):
             self._user_email = self._session.user["email"]
             self._acct_email_label.setText(self._user_email)
         else:
-            QMessageBox.critical(self, "Email Update", msg)
+            self._alert_dialog("Email Update", msg, kind="error")
 
     def _save_display_name(self, new_name):
         from modules.settings.account_backend import update_display_name
         if not hasattr(self, '_session') or not self._session.is_logged_in:
-            QMessageBox.critical(self, "Error", "Session not available.")
+            self._alert_dialog("Error", "Session not available.", kind="error")
             return
 
         success, msg = update_display_name(self._session.user_id, new_name)
@@ -643,7 +883,7 @@ class SettingsPage(QWidget):
             self._display_name = self._session.user["name"]
             self._acct_name_label.setText(self._display_name)
         else:
-            QMessageBox.critical(self, "Display Name", msg)
+            self._alert_dialog("Display Name", msg, kind="error")
 
     def _on_change_password(self):
         from modules.settings.account_backend import update_password, verify_password
@@ -651,12 +891,12 @@ class SettingsPage(QWidget):
         from core.email_service import send_verification_email, ResendTracker
 
         if not hasattr(self, '_session') or not self._session.is_logged_in:
-            QMessageBox.critical(self, "Error", "Session not available.")
+            self._alert_dialog("Error", "Session not available.", kind="error")
             return
 
         user_email = self._user_email
         if not user_email:
-            QMessageBox.critical(self, "Error", "No email address on file.")
+            self._alert_dialog("Error", "No email address on file.", kind="error")
             return
 
         parts = user_email.split("@")
@@ -750,7 +990,20 @@ class SettingsPage(QWidget):
         
         send_btn = QPushButton("✉ Send OTP")
         send_btn.setFixedSize(130, 36)
-        send_btn.setStyleSheet(f"background-color: {c('accent')}; color: #FFFFFF; border: none; border-radius: 8px; font-weight: bold;")
+        send_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('accent')};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 18px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {c('accent_hover')};
+            }}
+        """)
         p1_layout.addWidget(send_btn)
 
         phase2_buttons = QWidget()
@@ -770,7 +1023,20 @@ class SettingsPage(QWidget):
         
         verify_btn = QPushButton("✓ Verify & Save")
         verify_btn.setFixedSize(130, 36)
-        verify_btn.setStyleSheet(f"background-color: {c('accent')}; color: #FFFFFF; border: none; border-radius: 8px; font-weight: bold;")
+        verify_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('accent')};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 18px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {c('accent_hover')};
+            }}
+        """)
         p2_layout.addWidget(verify_btn)
 
         btn_row.addWidget(phase1_buttons)
@@ -850,7 +1116,7 @@ class SettingsPage(QWidget):
                 _set_status(f"⚠ {pw_msg}")
                 return
             dlg.accept()
-            QMessageBox.information(self, "Password Changed", "Your password has been updated successfully.")
+            self._alert_dialog("Password Changed", "Your password has been updated successfully.", kind="success")
 
         verify_btn.clicked.connect(_verify_and_save)
 
@@ -962,7 +1228,6 @@ class SettingsPage(QWidget):
         card = self._card(parent_layout)
         self._slider_row(card, "Confidence threshold", "Minimum score to accept a gesture", "gesture.confidence_threshold", 40, 95, 5, lambda v: f"{int(v)}%")
         self._slider_row(card, "Gesture timeout window", "Pause before assembling a sentence", "gesture.timeout", 0.5, 5.0, 0.5, lambda v: f"{v:.1f}s")
-        self._select_row(card, "Gesture library", "Active recognition dataset", "gesture.library", [("asl-standard", "ASL — Standard"), ("asl-fingerspell", "ASL — Fingerspelling"), ("custom", "Custom library")])
         self._toggle_row(card, "Show confidence indicator", "Display score badge on each gesture", "gesture.show_confidence_indicator")
 
     # ══════════════════════════════════════════════════════
@@ -1019,20 +1284,38 @@ class SettingsPage(QWidget):
 
         clear_right = self._row(card, "Clear gesture history", "Permanently delete all local logs", danger=True)
         clear_btn = QPushButton("Clear")
-        clear_btn.setFixedSize(70, 30)
-        clear_btn.setStyleSheet(f"background-color: {c('error_bg')}; color: {c('error')}; border: none; border-radius: 8px; font-weight: bold;")
+        clear_btn.setFixedSize(70, 28)
+        clear_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('error_bg')};
+                color: {c('error')};
+                border: none;
+                border-radius: 14px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {c('error')};
+                color: #FFFFFF;
+            }}
+        """)
         clear_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         
         def _confirm_clear():
-            reply = QMessageBox.question(self, "Clear Gesture History", "This will permanently delete all saved gesture history. This cannot be undone. Continue?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
+            if self._confirm_dialog("Clear Gesture History",
+                                   "This will permanently delete all saved gesture history.\n\nThis cannot be undone. Continue?",
+                                   confirm_text="Clear", danger=True):
                 from modules.gesture_history.backend import clear_history as _gh_clear
-                user_id = getattr(self._app, 'current_user_id', None)
-                _gh_clear(user_id)
-                clear_btn.hide()
-                cleared = QLabel("✓ Cleared")
-                cleared.setStyleSheet(f"background-color: {c('success_bg')}; color: {c('success')}; border-radius: 6px; padding: 2px 8px; font-family: 'Segoe UI'; font-size: 10px; font-weight: bold;")
-                clear_right.addWidget(cleared)
+                user_id = self._session.user_id if hasattr(self, '_session') and self._session.is_logged_in else None
+                success, msg = _gh_clear(user_id)
+                if success:
+                    clear_btn.hide()
+                    cleared = QLabel("✓ Cleared")
+                    cleared.setStyleSheet(f"background-color: {c('success_bg')}; color: {c('success')}; border-radius: 6px; padding: 2px 8px; font-family: 'Segoe UI'; font-size: 10px; font-weight: bold;")
+                    clear_right.addWidget(cleared)
+                else:
+                    self._alert_dialog("Clear Failed", msg, kind="error")
 
         clear_btn.clicked.connect(_confirm_clear)
         clear_right.addWidget(clear_btn)
@@ -1045,9 +1328,6 @@ class SettingsPage(QWidget):
         self._section_title(parent_layout, "Accessibility")
         card = self._card(parent_layout)
         self._toggle_row(card, "Screen reader support", "Optimize UI labels for assistive tools", "accessibility.screen_reader_support")
-        self._toggle_row(card, "Reduce motion", "Minimize animations in the interface", "accessibility.reduce_motion")
-        self._toggle_row(card, "Keyboard navigation", "Control app features without a mouse", "accessibility.keyboard_navigation")
-        self._toggle_row(card, "Gesture feedback vibration", "Haptic pulse on successful recognition", "accessibility.haptic_feedback")
 
     # ══════════════════════════════════════════════════════
     # SECTION: WEBCAM
@@ -1056,7 +1336,7 @@ class SettingsPage(QWidget):
     def _build_webcam(self, parent_layout):
         self._section_title(parent_layout, "Webcam")
         card = self._card(parent_layout)
-        self._toggle_row(card, "Enable webcam on launch", "Auto-start camera when app opens", "webcam.auto_start_on_launch")
+        self._toggle_row(card, "Enable webcam access", "Allow camera usage for gesture detection", "webcam.auto_start_on_launch")
         self._select_row(card, "Camera source", None, "webcam.camera_source", [("builtin", "Built-in webcam"), ("external", "External USB camera")])
         self._select_row(card, "Resolution", "Higher resolution may affect performance", "webcam.resolution", [("480p", "480p"), ("720p", "720p (recommended)"), ("1080p", "1080p")])
 
@@ -1072,25 +1352,13 @@ class SettingsPage(QWidget):
         self._badge(right, "Latest", "purple")
         self._row_divider(card)
 
-        right2 = self._row(card, "User guide & documentation")
-        arrow2 = QLabel("›")
-        arrow2.setStyleSheet(f"color: {c('text_muted')}; border: none; font-size: 18px; background: transparent;")
-        right2.addWidget(arrow2)
-        self._row_divider(card)
-
-        right3 = self._row(card, "Send feedback")
-        arrow3 = QLabel("›")
-        arrow3.setStyleSheet(f"color: {c('text_muted')}; border: none; font-size: 18px; background: transparent;")
-        right3.addWidget(arrow3)
-        self._row_divider(card)
-
         right4 = self._row(card, "Sign out", danger=True)
         arrow4 = QLabel("›")
         arrow4.setStyleSheet("color: #FDA4AF; border: none; font-size: 18px; background: transparent;")
         arrow4.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         def _on_sign_out(e):
-            reply = QMessageBox.question(self, "Sign Out", "Are you sure you want to sign out?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
+            if self._confirm_dialog("Sign Out", "Are you sure you want to sign out?",
+                                   confirm_text="Sign out"):
                 self._app.show_login()
         arrow4.mousePressEvent = _on_sign_out
         right4.addWidget(arrow4)
@@ -1103,25 +1371,62 @@ class SettingsPage(QWidget):
         bar = QWidget()
         b_layout = QHBoxLayout(bar)
         b_layout.setContentsMargins(0, 8, 0, 24)
-        b_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+        b_layout.setSpacing(8)
 
+        # ── Reset to defaults button (left side, only for resettable sections) ──
+        has_defaults = bool(section_id and _SECTION_DEFAULTS.get(section_id))
+        if has_defaults:
+            reset_btn = QPushButton("↺  Reset to defaults")
+            reset_btn.setFixedHeight(36)
+            reset_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            reset_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {c('text_muted')};
+                    border: 1px solid {c('border')};
+                    border-radius: 18px;
+                    font-family: 'Segoe UI';
+                    font-size: 12px;
+                    padding: 0px 16px;
+                }}
+                QPushButton:hover {{
+                    color: {c('error')};
+                    border-color: {c('error')};
+                    background-color: {c('error_bg')};
+                }}
+            """)
+            reset_btn.clicked.connect(lambda: self._on_reset_defaults(section_id))
+            b_layout.addWidget(reset_btn)
+
+        b_layout.addStretch()
+
+        # ── Toast label (appears between reset and save) ──
         saved_label = QLabel("")
-        saved_label.setStyleSheet(f"color: {c('success')}; background-color: {c('success_bg')}; border-radius: 8px; font-family: 'Segoe UI'; font-size: 12px; padding: 0 10px;")
+        saved_label.setFixedHeight(36)
+        saved_label.setStyleSheet(f"""
+            color: {c('success')};
+            background-color: {c('success_bg')};
+            border-radius: 8px;
+            font-family: 'Segoe UI';
+            font-size: 12px;
+            padding: 0 10px;
+        """)
         saved_label.hide()
         if section_id:
             self._save_labels[section_id] = saved_label
         b_layout.addWidget(saved_label)
-        b_layout.addSpacing(10)
+        b_layout.addSpacing(6)
 
+        # ── Save changes button (right side) ──
         save_btn = QPushButton("Save changes")
-        save_btn.setFixedSize(130, 40)
+        save_btn.setFixedSize(130, 36)
         save_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         save_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {c('accent')};
                 color: #FFFFFF;
                 border: none;
-                border-radius: 10px;
+                border-radius: 18px;
                 font-family: 'Segoe UI';
                 font-size: 13px;
                 font-weight: bold;
@@ -1139,20 +1444,97 @@ class SettingsPage(QWidget):
         config.save()
 
         # Re-apply live settings for the active section
-        if self._active_section == "appearance":
+        if self._active_section == "interface":
             theme_val = config.get("appearance.theme", "system")
             font_val = config.get("appearance.font_size", "medium")
             self._apply_font_size(font_val)
-            self._apply_theme(theme_val)  # rebuilds page last
+            self._apply_theme(theme_val)  # rebuilds page — resets _save_labels
+            # Show toast after rebuild completes (labels were recreated)
+            QTimer.singleShot(100, self._show_save_toast)
+            return
 
+        self._show_save_toast()
+
+    def _show_save_toast(self):
+        """Display the '✓ Changes saved' feedback label for the active section."""
         saved_label = self._save_labels.get(self._active_section)
         if not saved_label:
             return
-
-        saved_label.setText("✓ Changes saved")
+        saved_label.setStyleSheet(f"""
+            color: {c('success')};
+            background-color: {c('success_bg')};
+            border-radius: 8px;
+            font-family: 'Segoe UI';
+            font-size: 12px;
+            padding: 0 10px;
+        """)
+        saved_label.setText("✓  Changes saved")
         saved_label.show()
-        
         QTimer.singleShot(2500, saved_label.hide)
+
+    # ══════════════════════════════════════════════════════
+    # RESET TO DEFAULTS
+    # ══════════════════════════════════════════════════════
+
+    def _on_reset_defaults(self, section_id: str):
+        """Reset all config keys for the given section to their factory defaults."""
+        defaults = _SECTION_DEFAULTS.get(section_id, {})
+        if not defaults:
+            return
+
+        section_label = dict(SECTION_IDS).get(section_id, section_id)
+        confirmed = self._confirm_dialog(
+            "Reset to Defaults",
+            f'Reset all "{section_label}" settings to their defaults?\n\nYour current values will be lost. This cannot be undone.',
+            confirm_text="Reset",
+            danger=True,
+        )
+        if not confirmed:
+            return
+
+        # Write defaults into config
+        for key, value in defaults.items():
+            config.set(key, value)
+        config.save()
+
+        # ── Section-specific side effects ──────────────────────────────────
+        if section_id == "privacy":
+            # logging_enabled lives in SQLite (gesture_history backend), not in
+            # config — must be synced separately so the live logger actually
+            # stops, not just the UI checkbox.
+            from modules.gesture_history.backend import set_setting as _gh_set
+            _gh_set("logging_enabled", "0")
+
+        if section_id == "interface":
+            # _apply_theme triggers _rebuild_all internally; apply font first
+            self._apply_font_size("medium")
+            self._apply_theme("system")
+            QTimer.singleShot(100, self._show_reset_toast)
+            return  # _apply_theme already triggers rebuild
+
+        # Rebuild all widgets so every slider/toggle/combo reflects the new values
+        self._rebuild_all()
+        QTimer.singleShot(100, self._show_reset_toast)
+
+    def _show_reset_toast(self):
+        """Display the '↺ Reset to defaults' feedback label for the active section."""
+        saved_label = self._save_labels.get(self._active_section)
+        if not saved_label:
+            return
+        try:
+            saved_label.setStyleSheet(f"""
+                color: {c('warn')};
+                background-color: {c('warn_bg')};
+                border-radius: 8px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                padding: 0 10px;
+            """)
+            saved_label.setText("↺  Reset to defaults")
+            saved_label.show()
+            QTimer.singleShot(2500, saved_label.hide)
+        except RuntimeError:
+            pass  # widget was deleted during rebuild — safe to ignore
 
     # ══════════════════════════════════════════════════════
     # NAVIGATION

@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 venv/
 .env
+
+# Sensitive files — NEVER commit these
+signdesk_secrets.json
+signdesk.db

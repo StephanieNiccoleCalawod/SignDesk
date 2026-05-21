@@ -2,88 +2,27 @@
 service.py - Authentication Logic
 Handles user login and registration with SQLite and bcrypt.
 Includes email verification support for account creation.
+
+Encryption layer (v2)
+---------------------
+• All DB lookups on username/email use hmac_hash() — never plaintext.
+• New rows store hmac_hash in the indexed column + Fernet ciphertext in _enc column.
+• Passwords continue to use bcrypt (unchanged).
 """
 
-import re
 import bcrypt
 from core.database import get_connection
-
-
-# ──────────────────────────────────────────────────────────────
-# VALIDATION
-# ──────────────────────────────────────────────────────────────
-
-def validate_email(email: str) -> tuple[bool, str]:
-    """
-    Validates email format.
-    Returns (True, "") if valid, (False, "error message") if not.
-    """
-    if not email:
-        return False, "Email address is required."
-
-    # Basic email format check
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    if not re.match(pattern, email):
-        return False, "Please enter a valid email address."
-
-    return True, ""
-
-
-def validate_password(password: str) -> list[str]:
-    """
-    Checks password against all character requirements.
-    Returns a list of error strings — empty list means password is valid.
-    """
-    errors = []
-
-    if len(password) < 8:
-        errors.append("At least 8 characters")
-    if not re.search(r"[A-Z]", password):
-        errors.append("At least 1 uppercase letter (A–Z)")
-    if not re.search(r"[a-z]", password):
-        errors.append("At least 1 lowercase letter (a–z)")
-    if not re.search(r"[0-9]", password):
-        errors.append("At least 1 number (0–9)")
-    if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?]", password):
-        errors.append("At least 1 special character (!@#$%^&* etc.)")
-
-    return errors
-
-
-def validate_registration(username: str, email: str, password: str, confirm: str) -> list[str]:
-    """
-    Full validation of all registration fields.
-    Returns a list of error strings — empty means all fields are valid.
-    """
-    errors = []
-
-    # Required fields
-    if not username:
-        errors.append("Username is required.")
-    if not email:
-        errors.append("Email address is required.")
-    if not password:
-        errors.append("Password is required.")
-    if not confirm:
-        errors.append("Please confirm your password.")
-
-    if errors:
-        return errors  # Stop early if required fields missing
-
-    # Email format
-    email_valid, email_err = validate_email(email)
-    if not email_valid:
-        errors.append(email_err)
-
-    # Password strength
-    pwd_errors = validate_password(password)
-    errors.extend(pwd_errors)
-
-    # Password confirmation
-    if password != confirm:
-        errors.append("Password and confirmation password do not match.")
-
-    return errors
+from core.crypto import encrypt, hmac_hash
+from core.audit_log import log_event
+from core.validators import (
+    validate_email,
+    validate_username,
+    validate_password,
+    validate_registration,
+    sanitize_input,
+    sanitize_username,
+    registration_limiter,
+)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -94,11 +33,15 @@ def check_duplicate_username(username: str) -> tuple[bool, str]:
     """
     Returns (True, "error") if username already exists.
     Returns (False, "") if username is available.
+    Lookup is performed via HMAC hash — no plaintext stored in WHERE clause.
     """
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+            cursor.execute(
+                "SELECT 1 FROM users WHERE username = ?",
+                (hmac_hash(username),)
+            )
             exists = cursor.fetchone() is not None
 
         if exists:
@@ -106,18 +49,23 @@ def check_duplicate_username(username: str) -> tuple[bool, str]:
         return False, ""
 
     except Exception as e:
-        return True, f"Database error: {str(e)}"
+        print(f"[auth] check_duplicate_username error: {e}")
+        return True, "An unexpected error occurred. Please try again."
 
 
 def check_duplicate_email(email: str) -> tuple[bool, str]:
     """
-    Returns (True, "error") if email already exists in the database.
+    Returns (True, "error") if email already exists.
     Returns (False, "") if email is available.
+    Lookup uses HMAC hash with normalization (email is case-insensitive).
     """
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+            cursor.execute(
+                "SELECT 1 FROM users WHERE email = ?",
+                (hmac_hash(email, normalize=True),)
+            )
             exists = cursor.fetchone() is not None
 
         if exists:
@@ -125,7 +73,8 @@ def check_duplicate_email(email: str) -> tuple[bool, str]:
         return False, ""
 
     except Exception as e:
-        return True, f"Database error: {str(e)}"
+        print(f"[auth] check_duplicate_email error: {e}")
+        return True, "An unexpected error occurred. Please try again."
 
 
 # ──────────────────────────────────────────────────────────────
@@ -136,6 +85,7 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
     """
     Validates user credentials against the database.
     Returns (True, "Login successful") or (False, "error message").
+    Username lookup via HMAC hash — plaintext never touches the DB query.
     """
     try:
         with get_connection() as conn:
@@ -147,34 +97,39 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
                 FROM   users
                 WHERE  username = ?
                 """,
-                (username,)
+                (hmac_hash(username),)
             )
 
             row = cursor.fetchone()
 
         if row is None:
+            log_event("LOGIN_FAILED", username, "User not found")
             return False, "Incorrect username or password. Please try again."
 
-        stored_hash = row[0].encode("utf-8")
+        stored_hash    = row[0].encode("utf-8")
         email_verified = row[1]
-        
+
         if not bcrypt.checkpw(password.encode("utf-8"), stored_hash):
+            log_event("LOGIN_FAILED", username, "Incorrect password")
             return False, "Incorrect username or password. Please try again."
-            
+
         if email_verified == False:
+            log_event("LOGIN_FAILED", username, "Email not verified")
             return False, "Please verify your email address to log in."
-            
+
+        log_event("LOGIN_SUCCESS", username)
         return True, "Login successful."
 
     except Exception as e:
-        return False, f"Database error: {str(e)}"
+        print(f"[auth] login_user error: {e}")
+        log_event("LOGIN_FAILED", username, "Internal error")
+        return False, "An unexpected error occurred. Please try again."
 
 
 def register_user(username: str, email: str, password: str) -> tuple[bool, str, str]:
     """
     Legacy: Creates a new user account as unverified.
-    NOTE: This inserts into the DB before verification. Use the
-    in-memory OTP flow + create_verified_user() instead.
+    NOTE: Use the in-memory OTP flow + create_verified_user() instead.
     Kept for backwards compatibility only.
     """
     import random
@@ -182,115 +137,155 @@ def register_user(username: str, email: str, password: str) -> tuple[bool, str, 
     from datetime import datetime
     from core.email_service import get_otp_expiry
     try:
+        username_hash = hmac_hash(username)
+        email_hash    = hmac_hash(email, normalize=True)
+
         with get_connection() as conn:
             cursor = conn.cursor()
 
-            # Final duplicate checks (safety — may have changed since form submission)
-            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username_hash,))
             if cursor.fetchone():
                 return False, "This username already exists.", ""
 
-            cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+            cursor.execute("SELECT 1 FROM users WHERE email = ?", (email_hash,))
             if cursor.fetchone():
                 return False, "An account with this email already exists.", ""
 
-            # Hash the password securely with bcrypt
             password_hash = bcrypt.hashpw(
                 password.encode("utf-8"),
                 bcrypt.gensalt()
             ).decode("utf-8")
 
-            # Generate OTP
             verification_code = ''.join(random.choices(string.digits, k=6))
             expiry_time = get_otp_expiry()
 
-            # Insert new user with email_verified = 0
             cursor.execute(
                 """
-                INSERT INTO users (username, email, password_hash, email_verified, verification_code, verification_expiry)
-                VALUES (?, ?, ?, 0, ?, ?)
+                INSERT INTO users
+                    (username, email, username_enc, email_enc,
+                     name, password_hash, email_verified, verification_code, verification_expiry)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """,
-                (username, email, password_hash, verification_code, expiry_time)
+                (
+                    username_hash,
+                    email_hash,
+                    encrypt(username),
+                    encrypt(email),
+                    username,           # seed display name from plaintext
+                    password_hash,
+                    verification_code,
+                    expiry_time,
+                )
             )
 
         return True, "Account created tentatively.", verification_code
 
     except Exception as e:
-        return False, f"Database error: {str(e)}", ""
+        print(f"[auth] register_user error: {e}")
+        return False, "An unexpected error occurred. Please try again.", ""
 
 
 def create_verified_user(username: str, email: str, password: str) -> tuple[bool, str]:
     """
     Creates a fully verified user account.
     Called ONLY after OTP verification succeeds (in-memory check).
-    This ensures no orphan records are left if the user abandons verification.
     Returns: (Success, Message)
     """
     try:
+        username_hash = hmac_hash(username)
+        email_hash    = hmac_hash(email, normalize=True)
+
         with get_connection() as conn:
             cursor = conn.cursor()
 
-            # Final duplicate checks (safety — may have changed since form submission)
-            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username_hash,))
             if cursor.fetchone():
                 return False, "This username already exists. Please go back and choose another."
 
-            cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+            cursor.execute("SELECT 1 FROM users WHERE email = ?", (email_hash,))
             if cursor.fetchone():
                 return False, "An account with this email already exists."
 
-            # Hash the password securely with bcrypt
             password_hash = bcrypt.hashpw(
                 password.encode("utf-8"),
                 bcrypt.gensalt()
             ).decode("utf-8")
 
-            # Insert as fully verified — no verification_code needed
             cursor.execute(
                 """
-                INSERT INTO users (username, email, password_hash, email_verified)
-                VALUES (?, ?, ?, 1)
+                INSERT INTO users
+                    (username, email, username_enc, email_enc,
+                     name, password_hash, email_verified)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
                 """,
-                (username, email, password_hash)
+                (
+                    username_hash,
+                    email_hash,
+                    encrypt(username),
+                    encrypt(email),
+                    username,           # seed display name
+                    password_hash,
+                )
             )
 
+        log_event("REGISTER_SUCCESS", username, "Account created (verified)")
         return True, "Account created successfully."
 
     except Exception as e:
-        return False, f"Database error: {str(e)}"
+        print(f"[auth] create_verified_user error: {e}")
+        log_event("REGISTER_FAILED", username, "Internal error")
+        return False, "An unexpected error occurred. Please try again."
+
 
 def verify_user(email: str, entered_code: str) -> tuple[bool, str]:
     """
     Verifies the user's email against the database OTP.
+    Email lookup via HMAC hash.
     """
     from datetime import datetime
     try:
+        email_hash = hmac_hash(email, normalize=True)
+
         with get_connection() as conn:
             cursor = conn.cursor()
-            
-            cursor.execute("SELECT verification_code, verification_expiry, email_verified FROM users WHERE email = ?", (email,))
+
+            cursor.execute(
+                "SELECT verification_code, verification_expiry, email_verified "
+                "FROM users WHERE email = ?",
+                (email_hash,)
+            )
             row = cursor.fetchone()
-            
+
             if not row:
                 return False, "Account error: User not found."
-                
+
             stored_code, expiry, verified = row
-            
+
             if verified == True:
                 return False, "Account is already verified."
-                
+
             if stored_code != entered_code:
+                log_event("EMAIL_VERIFY_FAILED", email, "Incorrect code")
                 return False, "Incorrect verification code."
-                
+
             if expiry and datetime.now() > expiry:
+                log_event("EMAIL_VERIFY_FAILED", email, "Code expired")
                 return False, "Verification code has expired."
-                
-            # Update as verified
-            cursor.execute("UPDATE users SET email_verified = 1, verification_code = NULL, verification_expiry = NULL WHERE email = ?", (email,))
-            
+
+            cursor.execute(
+                "UPDATE users SET email_verified = 1, "
+                "verification_code = NULL, verification_expiry = NULL "
+                "WHERE email = ?",
+                (email_hash,)
+            )
+
+        log_event("EMAIL_VERIFY_SUCCESS", email)
         return True, "Email verified successfully."
     except Exception as e:
-        return False, f"Database error: {str(e)}"
+        print(f"[auth] verify_user error: {e}")
+        log_event("EMAIL_VERIFY_FAILED", email, "Internal error")
+        return False, "An unexpected error occurred. Please try again."
+
 
 def resend_verification_code(email: str) -> tuple[bool, str, str]:
     """
@@ -301,22 +296,32 @@ def resend_verification_code(email: str) -> tuple[bool, str, str]:
     import string
     from core.email_service import get_otp_expiry
     try:
+        email_hash = hmac_hash(email, normalize=True)
+
         with get_connection() as conn:
             cursor = conn.cursor()
-            
-            cursor.execute("SELECT email_verified FROM users WHERE email = ?", (email,))
+
+            cursor.execute(
+                "SELECT email_verified FROM users WHERE email = ?",
+                (email_hash,)
+            )
             row = cursor.fetchone()
             if not row:
                 return False, "Account error: User not found.", ""
-                
+
             if row[0] == True:
                 return False, "Email is already verified.", ""
-                
+
             new_code = ''.join(random.choices(string.digits, k=6))
-            expiry = get_otp_expiry()
-            
-            cursor.execute("UPDATE users SET verification_code = ?, verification_expiry = ? WHERE email = ?", (new_code, expiry, email))
-            
+            expiry   = get_otp_expiry()
+
+            cursor.execute(
+                "UPDATE users SET verification_code = ?, verification_expiry = ? "
+                "WHERE email = ?",
+                (new_code, expiry, email_hash)
+            )
+
         return True, "New code generated.", new_code
     except Exception as e:
-        return False, f"Database error: {str(e)}", ""
+        print(f"[auth] resend_verification_code error: {e}")
+        return False, "An unexpected error occurred. Please try again.", ""

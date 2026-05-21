@@ -107,8 +107,10 @@ def send_password_reset_email(to_email: str, otp_code: str) -> tuple[bool, str]:
     except smtplib.SMTPRecipientsRefused:
         return False, "The email address was rejected. Please enter a valid email."
     except smtplib.SMTPException as e:
-        return False, f"Failed to send email: {str(e)}"
+        print(f"[email] SMTP error sending password reset: {e}")
+        return False, "Failed to send email. Please try again later."
     except TimeoutError:
         return False, "Email sending timed out. Please check your internet connection."
     except Exception as e:
-        return False, f"Failed to send password reset email: {str(e)}"
+        print(f"[email] Unexpected error sending password reset: {e}")
+        return False, "Failed to send email. Please try again later."
