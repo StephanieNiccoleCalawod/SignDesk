@@ -17,8 +17,15 @@ Sensitive columns are encrypted at rest:
   ──────────────────────────────────────────────────────────────────────────
   email         TEXT         →  now stores HMAC-SHA256 hash (lookup only)
 
+  audit_log table
+  ──────────────────────────────────────────────────────────────────────────
+  actor         TEXT         →  now stores HMAC-SHA256 hash for fast lookups
+  actor_enc     TEXT         →  Fernet ciphertext (decrypted for display only)
+
   gesture_history table
   ──────────────────────────────────────────────────────────────────────────
+  gesture              TEXT  →  cleared after migration (NULL)
+  gesture_enc          TEXT  →  Fernet ciphertext (decrypted for display only)
   translated_text      TEXT  →  cleared after migration (NULL)
   translated_text_enc  TEXT  →  Fernet ciphertext (decrypted for display only)
 
@@ -197,11 +204,13 @@ def _migrate_otp_tokens_encryption(conn):
 
 def _migrate_gesture_history_encryption(conn):
     """
-    Add translated_text_enc and encrypt any existing plaintext rows.
+    Add translated_text_enc / gesture_enc and encrypt any existing plaintext rows.
 
     After migration:
-      gesture_history.translated_text     = NULL
-      gesture_history.translated_text_enc = Fernet ciphertext
+      gesture_history.gesture              = NULL
+      gesture_history.gesture_enc          = Fernet ciphertext
+      gesture_history.translated_text      = NULL
+      gesture_history.translated_text_enc  = Fernet ciphertext
     """
     from core.crypto import encrypt
 
@@ -213,6 +222,13 @@ def _migrate_gesture_history_encryption(conn):
         )
         conn.commit()
 
+    if not _column_exists(cursor, "gesture_history", "gesture_enc"):
+        cursor.execute(
+            "ALTER TABLE gesture_history ADD COLUMN gesture_enc TEXT DEFAULT ''"
+        )
+        conn.commit()
+
+    # Migrate translated_text
     cursor.execute(
         """
         SELECT id, translated_text
@@ -231,6 +247,27 @@ def _migrate_gesture_history_encryption(conn):
              WHERE id = ?
             """,
             (encrypt(row["translated_text"]), row["id"]),
+        )
+
+    # Migrate gesture
+    cursor.execute(
+        """
+        SELECT id, gesture
+          FROM gesture_history
+         WHERE gesture IS NOT NULL
+           AND gesture != ''
+           AND (gesture_enc IS NULL OR gesture_enc = '')
+        """
+    )
+    for row in cursor.fetchall():
+        cursor.execute(
+            """
+            UPDATE gesture_history
+               SET gesture_enc = ?,
+                   gesture     = ''
+             WHERE id = ?
+            """,
+            (encrypt(row["gesture"]), row["id"]),
         )
     conn.commit()
 

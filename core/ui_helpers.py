@@ -83,7 +83,7 @@ class ToggleSwitch(QWidget):
         p.end()
 
 
-def _add_shadow(widget: QWidget, blur: int = 5, opacity: int = 55, offset_y: int = 2):
+def _add_shadow(widget: QWidget, blur: int = 3, opacity: int = 30, offset_y: int = 1):
     """Attach a tight drop shadow to any QWidget/QFrame card.
     Small blur + small offset = shadow hugs the box edge cleanly."""
     shadow = QGraphicsDropShadowEffect(widget)

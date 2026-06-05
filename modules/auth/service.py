@@ -91,38 +91,41 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
         with get_connection() as conn:
             cursor = conn.cursor()
 
+            username_hashed = hmac_hash(username)
+
             cursor.execute(
                 """
-                SELECT password_hash, email_verified
+                SELECT id, password_hash, email_verified
                 FROM   users
                 WHERE  username = ?
                 """,
-                (hmac_hash(username),)
+                (username_hashed,)
             )
 
             row = cursor.fetchone()
 
         if row is None:
-            log_event("LOGIN_FAILED", username, "User not found")
+            log_event("LOGIN_FAILED", username_hashed, "User not found")
             return False, "Incorrect username or password. Please try again."
 
-        stored_hash    = row[0].encode("utf-8")
-        email_verified = row[1]
+        user_id        = row[0]
+        stored_hash    = row[1].encode("utf-8")
+        email_verified = row[2]
 
         if not bcrypt.checkpw(password.encode("utf-8"), stored_hash):
-            log_event("LOGIN_FAILED", username, "Incorrect password")
+            log_event("LOGIN_FAILED", username_hashed, "Incorrect password")
             return False, "Incorrect username or password. Please try again."
 
         if email_verified == False:
-            log_event("LOGIN_FAILED", username, "Email not verified")
+            log_event("LOGIN_FAILED", username_hashed, "Email not verified")
             return False, "Please verify your email address to log in."
 
-        log_event("LOGIN_SUCCESS", username)
+        log_event("LOGIN_SUCCESS", str(user_id))
         return True, "Login successful."
 
     except Exception as e:
         print(f"[auth] login_user error: {e}")
-        log_event("LOGIN_FAILED", username, "Internal error")
+        log_event("LOGIN_FAILED", hmac_hash(username), "Internal error")
         return False, "An unexpected error occurred. Please try again."
 
 
@@ -228,12 +231,12 @@ def create_verified_user(username: str, email: str, password: str) -> tuple[bool
                 )
             )
 
-        log_event("REGISTER_SUCCESS", username, "Account created (verified)")
+        log_event("REGISTER_SUCCESS", hmac_hash(username), "Account created (verified)")
         return True, "Account created successfully."
 
     except Exception as e:
         print(f"[auth] create_verified_user error: {e}")
-        log_event("REGISTER_FAILED", username, "Internal error")
+        log_event("REGISTER_FAILED", hmac_hash(username), "Internal error")
         return False, "An unexpected error occurred. Please try again."
 
 
@@ -265,11 +268,11 @@ def verify_user(email: str, entered_code: str) -> tuple[bool, str]:
                 return False, "Account is already verified."
 
             if stored_code != entered_code:
-                log_event("EMAIL_VERIFY_FAILED", email, "Incorrect code")
+                log_event("EMAIL_VERIFY_FAILED", hmac_hash(email, normalize=True), "Incorrect code")
                 return False, "Incorrect verification code."
 
             if expiry and datetime.now() > expiry:
-                log_event("EMAIL_VERIFY_FAILED", email, "Code expired")
+                log_event("EMAIL_VERIFY_FAILED", hmac_hash(email, normalize=True), "Code expired")
                 return False, "Verification code has expired."
 
             cursor.execute(
@@ -279,11 +282,11 @@ def verify_user(email: str, entered_code: str) -> tuple[bool, str]:
                 (email_hash,)
             )
 
-        log_event("EMAIL_VERIFY_SUCCESS", email)
+        log_event("EMAIL_VERIFY_SUCCESS", hmac_hash(email, normalize=True))
         return True, "Email verified successfully."
     except Exception as e:
         print(f"[auth] verify_user error: {e}")
-        log_event("EMAIL_VERIFY_FAILED", email, "Internal error")
+        log_event("EMAIL_VERIFY_FAILED", hmac_hash(email, normalize=True), "Internal error")
         return False, "An unexpected error occurred. Please try again."
 
 

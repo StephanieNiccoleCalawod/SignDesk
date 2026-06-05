@@ -6,6 +6,8 @@ Encryption layer (v2)
 ---------------------
 gesture_history.translated_text_enc stores a Fernet ciphertext.
 gesture_history.translated_text is cleared (NULL) after migration.
+gesture_history.gesture_enc stores a Fernet ciphertext.
+gesture_history.gesture is cleared (NULL) after migration.
 All writes encrypt the value; all reads decrypt it transparently.
 
 FIX: init_history_db() now syncs the DB 'logging_enabled' setting from
@@ -36,7 +38,8 @@ def init_history_db() -> tuple[bool, str]:
                 CREATE TABLE IF NOT EXISTS gesture_history (
                     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id             INTEGER,
-                    gesture             TEXT NOT NULL,
+                    gesture             TEXT,
+                    gesture_enc         TEXT DEFAULT '',
                     translated_text     TEXT,
                     translated_text_enc TEXT DEFAULT '',
                     confidence          REAL,
@@ -67,6 +70,11 @@ def init_history_db() -> tuple[bool, str]:
                     "ALTER TABLE gesture_history ADD COLUMN translated_text_enc TEXT DEFAULT ''"
                 )
 
+            if "gesture_enc" not in columns:
+                cursor.execute(
+                    "ALTER TABLE gesture_history ADD COLUMN gesture_enc TEXT DEFAULT ''"
+                )
+
             # Seed default settings
             defaults = {
                 "logging_enabled":     "0",
@@ -81,6 +89,9 @@ def init_history_db() -> tuple[bool, str]:
 
         # Encrypt any existing plaintext translated_text rows
         _migrate_translated_text_encryption()
+
+        # Encrypt any existing plaintext gesture rows
+        _migrate_gesture_encryption()
 
         # Sync logging flag from config
         _sync_logging_flag_from_config()
@@ -115,6 +126,35 @@ def _migrate_translated_text_encryption():
                      WHERE id = ?
                     """,
                     (encrypt(row["translated_text"]), row["id"]),
+                )
+    except Exception:
+        pass  # Non-fatal — migration will retry next startup
+
+
+def _migrate_gesture_encryption():
+    """Encrypt any gesture_history rows whose gesture is still plaintext."""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, gesture
+                  FROM gesture_history
+                 WHERE gesture IS NOT NULL
+                   AND gesture != ''
+                   AND (gesture_enc IS NULL OR gesture_enc = '')
+                """
+            )
+            rows = cursor.fetchall()
+            for row in rows:
+                cursor.execute(
+                    """
+                    UPDATE gesture_history
+                       SET gesture_enc = ?,
+                           gesture     = ''
+                     WHERE id = ?
+                    """,
+                    (encrypt(row["gesture"]), row["id"]),
                 )
     except Exception:
         pass  # Non-fatal — migration will retry next startup
@@ -188,13 +228,13 @@ def log_gesture(
             cursor.execute(
                 """
                 INSERT INTO gesture_history
-                    (user_id, gesture, translated_text, translated_text_enc,
-                     confidence, logged_at)
-                VALUES (?, ?, NULL, ?, ?, ?)
+                    (user_id, gesture, gesture_enc, translated_text,
+                     translated_text_enc, confidence, logged_at)
+                VALUES (?, '', ?, NULL, ?, ?, ?)
                 """,
                 (
                     user_id,
-                    gesture,
+                    encrypt(gesture),
                     encrypt(final_translation) if final_translation is not None else "",
                     final_confidence,
                     logged_at,
@@ -228,6 +268,10 @@ def get_history(user_id: int) -> list[dict]:
             enc = d.get("translated_text_enc") or ""
             plain = d.get("translated_text") or ""
             d["translated_text"] = decrypt(enc) if enc else plain
+
+            g_enc = d.get("gesture_enc") or ""
+            g_plain = d.get("gesture") or ""
+            d["gesture"] = decrypt(g_enc) if g_enc else g_plain
             result.append(d)
 
         return result

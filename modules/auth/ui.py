@@ -206,7 +206,7 @@ def make_left_panel() -> QFrame:
     layout.addSpacing(8)
 
     # ── Tagline ────────────────────────────────────────
-    tag_lbl = QLabel("Sign language to speech,\nseamlessly.")
+    tag_lbl = QLabel("Master sign language,\ninteractively.")
     tag_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
     muted_col = "#B8B5D0" if is_dark() else "#5A5490"
     tag_lbl.setStyleSheet(f"color: {muted_col}; background: transparent; border: none; font-size: 13px;")
@@ -412,10 +412,11 @@ class LoginPage(QWidget):
             return ln
 
         or_lbl = QLabel("or")
-        or_lbl.setStyleSheet(f"color: {TXT_LIGHT}; background: transparent; border: none; padding: 0 8px;")
-        div_lay.addWidget(_hline())
-        div_lay.addWidget(or_lbl)
-        div_lay.addWidget(_hline())
+        or_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        or_lbl.setStyleSheet(f"color: {TXT_MID}; background: transparent; border: none; padding: 0 8px;")
+        div_lay.addWidget(_hline(), stretch=1)
+        div_lay.addWidget(or_lbl, stretch=0, alignment=Qt.AlignmentFlag.AlignCenter)
+        div_lay.addWidget(_hline(), stretch=1)
         card_lay.addWidget(div_row)
 
         card_lay.addWidget(_outline_btn("Create Account", self._app.show_register))

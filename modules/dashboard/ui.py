@@ -8,11 +8,12 @@ from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
     QScrollArea, QLineEdit, QMessageBox, QGridLayout, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QTimer, QRect, QPoint
 from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QCursor
 
 from core.theme import c, is_dark
 from core.ui_helpers import create_nav_item, build_steps_panel, _set_font, _add_shadow
+from modules.dashboard.dashboard_service import get_dashboard_summary, search_dashboard
 
 class GradientSidebar(QFrame):
     """Sidebar with vertical gradient background — respects current theme mode."""
@@ -21,7 +22,6 @@ class GradientSidebar(QFrame):
         self.setFixedWidth(210)
 
     def paintEvent(self, event):
-        from core.theme import is_dark
         dark = is_dark()
         painter = QPainter(self)
         grad = QLinearGradient(0, 0, 0, self.height())
@@ -29,13 +29,220 @@ class GradientSidebar(QFrame):
         grad.setColorAt(1, QColor(c("panel_left_end", dark=dark)))
         painter.fillRect(self.rect(), grad)
 
+class SearchDropdown(QFrame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setObjectName("searchDropdown")
+        self.setStyleSheet(f"""
+            QFrame#searchDropdown {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 8px;
+            }}
+        """)
+        self.hide()
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 4, 0, 4)
+        self.layout.setSpacing(0)
+        _add_shadow(self)
+
+    def update_results(self, results, on_click):
+        # Clear previous
+        while self.layout.count():
+            item = self.layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        if not results:
+            lbl = QLabel("No results found")
+            lbl.setStyleSheet(f"color: {c('text_muted')}; padding: 8px 16px;")
+            _set_font(lbl, size=11)
+            self.layout.addWidget(lbl)
+            self.setFixedHeight(40)
+            return
+
+        for r in results:
+            item_widget = QWidget()
+            item_widget.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            item_layout = QVBoxLayout(item_widget)
+            item_layout.setContentsMargins(16, 8, 16, 8)
+            item_layout.setSpacing(2)
+            
+            t_lbl = QLabel(r["title"])
+            t_lbl.setStyleSheet(f"color: {c('text_primary')}; font-weight: bold;")
+            
+            d_lbl = QLabel(f"{r['type']} - {r['desc']}")
+            d_lbl.setStyleSheet(f"color: {c('text_muted')};")
+            _set_font(d_lbl, size=10)
+            
+            item_layout.addWidget(t_lbl)
+            item_layout.addWidget(d_lbl)
+            
+            # Hover styling
+            def enter(e, w=item_widget): w.setStyleSheet(f"background-color: {c('input_bg')};")
+            def leave(e, w=item_widget): w.setStyleSheet("background-color: transparent;")
+            def press(e, r_action=r["action"]): on_click(r_action)
+            item_widget.enterEvent = enter
+            item_widget.leaveEvent = leave
+            item_widget.mousePressEvent = press
+            
+            self.layout.addWidget(item_widget)
+            
+        self.adjustSize()
+        # Cap height
+        if self.height() > 300:
+            self.setFixedHeight(300)
+
+class ProfileDropdown(QFrame):
+    def __init__(self, parent, user_data, on_action):
+        super().__init__(parent)
+        self.setObjectName("profileDropdown")
+        self.setStyleSheet(f"""
+            QFrame#profileDropdown {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 8px;
+            }}
+        """)
+        self.hide()
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 8, 0, 8)
+        self.layout.setSpacing(0)
+        _add_shadow(self)
+
+        # Header
+        header = QWidget()
+        h_layout = QVBoxLayout(header)
+        h_layout.setContentsMargins(16, 8, 16, 12)
+        h_layout.setSpacing(2)
+        
+        n_lbl = QLabel(user_data.display_name)
+        n_lbl.setStyleSheet(f"color: {c('text_primary')}; font-weight: bold; font-size: 14px;")
+        
+        e_lbl = QLabel(user_data.email)
+        e_lbl.setStyleSheet(f"color: {c('text_muted')}; font-size: 11px;")
+        
+        r_lbl = QLabel(f"Role: {user_data.role}")
+        r_lbl.setStyleSheet(f"color: {c('info')}; font-size: 11px;")
+        
+        h_layout.addWidget(n_lbl)
+        h_layout.addWidget(e_lbl)
+        h_layout.addWidget(r_lbl)
+        self.layout.addWidget(header)
+        
+        # Div
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet(f"background-color: {c('border')}; border: none;")
+        self.layout.addWidget(div)
+        
+        # Actions
+        actions = [
+            ("Profile", "settings"),
+            ("Settings", "settings"),
+            ("Privacy Settings", "privacy"),
+            ("Logout", "logout")
+        ]
+        
+        for text, action in actions:
+            btn = QLabel(text)
+            btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            if action == "logout":
+                btn.setStyleSheet(f"color: #FF8A80; padding: 10px 16px; font-weight: bold;")
+            else:
+                btn.setStyleSheet(f"color: {c('text_primary')}; padding: 10px 16px;")
+            
+            def enter(e, w=btn, act=action): 
+                w.setStyleSheet(f"background-color: {c('input_bg')}; color: {'#FF8A80' if act == 'logout' else c('text_primary')}; padding: 10px 16px; font-weight: {'bold' if act == 'logout' else 'normal'};")
+            def leave(e, w=btn, act=action): 
+                w.setStyleSheet(f"background-color: transparent; color: {'#FF8A80' if act == 'logout' else c('text_primary')}; padding: 10px 16px; font-weight: {'bold' if act == 'logout' else 'normal'};")
+            def press(e, a=action): 
+                self.hide()
+                on_action(a)
+                
+            btn.enterEvent = enter
+            btn.leaveEvent = leave
+            btn.mousePressEvent = press
+            
+            self.layout.addWidget(btn)
+            
+        self.adjustSize()
+
 class DashboardPage(QWidget):
     def __init__(self, parent, app, username: str):
         super().__init__(parent)
         self._app = app
         self._username = username
         self.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        
+        # We will keep references to labels to update them dynamically
+        self._lbl_greeting_top = None
+        self._lbl_greeting_card = None
+        self._lbl_sessions = None
+        self._lbl_confidence = None
+        self._lbl_signs = None
+        
+        self._lbl_camera = None
+        self._lbl_privacy = None
+        self._lbl_history_log = None
+        
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self._execute_search)
+        
         self._build()
+
+    def showEvent(self, event):
+        self.refresh_dashboard()
+        super().showEvent(event)
+
+    def mousePressEvent(self, event):
+        if hasattr(self, '_search_dropdown') and self._search_dropdown.isVisible():
+            self._search_dropdown.hide()
+        if hasattr(self, '_profile_dropdown') and self._profile_dropdown.isVisible():
+            self._profile_dropdown.hide()
+        super().mousePressEvent(event)
+
+    def refresh_dashboard(self):
+        summary = get_dashboard_summary(self._username)
+        if not summary:
+            return
+            
+        if self._lbl_greeting_top:
+            self._lbl_greeting_top.setText(f"{summary.greeting}, {summary.display_name}")
+        if self._lbl_greeting_card:
+            self._lbl_greeting_card.setText(f"{summary.greeting}, {summary.display_name}")
+            
+
+
+        if self._lbl_sessions:
+            self._lbl_sessions.setText(str(summary.sessions_today))
+        if self._lbl_confidence:
+            self._lbl_confidence.setText(f"{summary.avg_confidence:.1f}%")
+        if self._lbl_signs:
+            self._lbl_signs.setText(str(summary.unique_signs_recognized))
+
+        if self._lbl_camera:
+            self._lbl_camera.setText(summary.camera_status)
+            if summary.camera_status == "Ready":
+                self._lbl_camera.parentWidget().setStyleSheet(f"background-color: {c('info_bg')}; border-radius: 8px; border: none;")
+                self._lbl_camera.setStyleSheet(f"color: {c('info')}; background: transparent; border: none;")
+            else:
+                self._lbl_camera.parentWidget().setStyleSheet(f"background-color: {c('error_bg')}; border-radius: 8px; border: none;")
+                self._lbl_camera.setStyleSheet(f"color: {c('error')}; background: transparent; border: none;")
+
+        if self._lbl_privacy:
+            self._lbl_privacy.setText(summary.privacy_mode)
+            
+        if self._lbl_history_log:
+            self._lbl_history_log.setText("Enabled" if summary.history_logging_enabled else "Disabled")
+            if summary.history_logging_enabled:
+                self._lbl_history_log.parentWidget().setStyleSheet(f"background-color: {c('success_bg')}; border-radius: 8px; border: none;")
+                self._lbl_history_log.setStyleSheet(f"color: {c('success')}; background: transparent; border: none;")
+            else:
+                self._lbl_history_log.parentWidget().setStyleSheet(f"background-color: {c('badge_gray_bg')}; border-radius: 8px; border: none;")
+                self._lbl_history_log.setStyleSheet(f"color: {c('badge_gray_fg')}; background: transparent; border: none;")
 
     # ── Navigation callbacks ───────────────────────────────
 
@@ -49,6 +256,9 @@ class DashboardPage(QWidget):
     def _launch_gesture_history(self):
         self._app.show_gesture_history(self._username)
 
+    def _show_dictionary_coming_soon(self):
+        QMessageBox.information(self, "Coming Soon", "The Sign Dictionary feature is coming soon!")
+
     def _on_logout(self):
         reply = QMessageBox.question(
             self, "Logout", "Are you sure you want to log out?",
@@ -56,6 +266,66 @@ class DashboardPage(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._app.show_login()
+
+    def _handle_action(self, action):
+        if action == "dashboard":
+            pass
+        elif action == "gesture":
+            self._launch_gesture_detection()
+        elif action == "settings":
+            self._launch_settings()
+        elif action == "privacy":
+            self._launch_settings() # settings handles privacy tab internally if needed
+        elif action == "dictionary":
+            self._show_dictionary_coming_soon()
+        elif action == "history":
+            self._launch_gesture_history()
+        elif action == "logout":
+            self._on_logout()
+
+    def _on_search_text_changed(self, text):
+        self._search_timer.start()
+        if not text.strip() and hasattr(self, '_search_dropdown'):
+            self._search_dropdown.hide()
+
+    def _execute_search(self):
+        text = self._search_entry.text().strip()
+        if not text:
+            if hasattr(self, '_search_dropdown'):
+                self._search_dropdown.hide()
+            return
+            
+        results = search_dashboard(text, self._username)
+        
+        # Position dropdown
+        if not hasattr(self, '_search_dropdown'):
+            self._search_dropdown = SearchDropdown(self)
+            
+        self._search_dropdown.update_results(results, self._handle_action)
+        
+        rect = self._search_frame.geometry()
+        g_pos = self._search_frame.parentWidget().mapTo(self, rect.bottomLeft())
+        
+        self._search_dropdown.setFixedWidth(self._search_frame.width())
+        self._search_dropdown.move(g_pos.x(), g_pos.y() + 4)
+        self._search_dropdown.show()
+        self._search_dropdown.raise_()
+
+    def _show_profile_dropdown(self, pos):
+        if not hasattr(self, '_profile_dropdown'):
+            summary = get_dashboard_summary(self._username)
+            if not summary:
+                return
+            self._profile_dropdown = ProfileDropdown(self, summary, self._handle_action)
+            
+        rect = self._avatar_widget.geometry()
+        g_pos = self._avatar_widget.parentWidget().mapTo(self, rect.bottomLeft())
+        
+        self._profile_dropdown.adjustSize()
+        x_pos = g_pos.x() + rect.width() - self._profile_dropdown.width()
+        self._profile_dropdown.move(x_pos, g_pos.y() + 4)
+        self._profile_dropdown.show()
+        self._profile_dropdown.raise_()
 
     # ── Main build ─────────────────────────────────────────
 
@@ -79,7 +349,6 @@ class DashboardPage(QWidget):
         layout.setContentsMargins(16, 24, 16, 20)
         layout.setSpacing(0)
 
-        # ── Logo + brand ──────────────────────────────────
         brand_layout = QHBoxLayout()
         brand_layout.setContentsMargins(0, 0, 0, 0)
         brand_layout.setSpacing(10)
@@ -106,7 +375,6 @@ class DashboardPage(QWidget):
 
         layout.addLayout(brand_layout)
         
-        # Subtle divider
         div1 = QFrame()
         div1.setFixedHeight(1)
         div1.setStyleSheet(f"background-color: {c('border')}; border: none;")
@@ -114,20 +382,18 @@ class DashboardPage(QWidget):
         layout.addWidget(div1)
         layout.addSpacing(16)
 
-        # ── Navigation items ──────────────────────────────
         nav_layout = QVBoxLayout()
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setSpacing(2)
 
         nav_layout.addWidget(create_nav_item(sidebar, "■", "Dashboard", is_active=True))
         nav_layout.addWidget(create_nav_item(sidebar, "◈", "Gesture Translator", command=self._launch_gesture_detection))
-        nav_layout.addWidget(create_nav_item(sidebar, "▣", "Sign Dictionary"))
+        nav_layout.addWidget(create_nav_item(sidebar, "▣", "Sign Dictionary", command=self._show_dictionary_coming_soon))
         nav_layout.addWidget(create_nav_item(sidebar, "▲", "Gesture History", command=self._launch_gesture_history))
 
         layout.addLayout(nav_layout)
         layout.addStretch()
 
-        # ── Bottom section — divider + logout ─────────────
         div2 = QFrame()
         div2.setFixedHeight(1)
         div2.setStyleSheet(f"background-color: {c('border')}; border: none;")
@@ -140,7 +406,6 @@ class DashboardPage(QWidget):
 
         bottom_layout.addWidget(create_nav_item(sidebar, "◎", "Settings", command=self._launch_settings))
 
-        # Custom logout item with red text
         logout_btn = QWidget()
         logout_btn.setFixedHeight(38)
         logout_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -156,7 +421,6 @@ class DashboardPage(QWidget):
         lo_layout.addWidget(lo_text)
         lo_layout.addStretch()
 
-        # Hover logic for logout
         def enterEvent(e): logout_btn.setStyleSheet(f"background-color: {c('input_bg')}; border-radius: 10px;")
         def leaveEvent(e): logout_btn.setStyleSheet("background-color: transparent; border-radius: 10px;")
         def mousePressEvent(e): 
@@ -216,17 +480,15 @@ class DashboardPage(QWidget):
         layout = QHBoxLayout(topbar)
         layout.setContentsMargins(28, 16, 28, 4)
         
-        # Left: greeting
-        greeting = QLabel(f"Welcome back, {self._username}")
-        greeting.setStyleSheet(f"color: {c('text_primary')}; font-family: 'Segoe UI'; font-size: 22px; font-weight: bold;")
-        layout.addWidget(greeting)
+        self._lbl_greeting_top = QLabel(f"Loading...")
+        self._lbl_greeting_top.setStyleSheet(f"color: {c('text_primary')}; font-family: 'Segoe UI'; font-size: 22px; font-weight: bold;")
+        layout.addWidget(self._lbl_greeting_top)
         
         layout.addStretch()
 
-        # Right: search bar
-        search_frame = QFrame()
-        search_frame.setObjectName("searchFrame")
-        search_frame.setStyleSheet(f"""
+        self._search_frame = QFrame()
+        self._search_frame.setObjectName("searchFrame")
+        self._search_frame.setStyleSheet(f"""
             QFrame#searchFrame {{
                 background-color: {c('input_bg')};
                 border: 1px solid {c('border')};
@@ -237,18 +499,18 @@ class DashboardPage(QWidget):
                 border: none;
             }}
         """)
-        search_frame.setFixedHeight(36)
-        search_frame.setMinimumWidth(200)
-        search_frame.setMaximumWidth(280)
-        s_layout = QHBoxLayout(search_frame)
+        self._search_frame.setFixedHeight(36)
+        self._search_frame.setMinimumWidth(200)
+        self._search_frame.setMaximumWidth(280)
+        s_layout = QHBoxLayout(self._search_frame)
         s_layout.setContentsMargins(14, 0, 14, 0)
         
         s_icon = QLabel("⌕")
         s_icon.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
         
-        s_entry = QLineEdit()
-        s_entry.setPlaceholderText("Search...")
-        s_entry.setStyleSheet(f"""
+        self._search_entry = QLineEdit()
+        self._search_entry.setPlaceholderText("Search...")
+        self._search_entry.setStyleSheet(f"""
             QLineEdit {{
                 border: none;
                 background: transparent;
@@ -257,18 +519,19 @@ class DashboardPage(QWidget):
                 font-size: 12px;
             }}
         """)
+        self._search_entry.textChanged.connect(self._on_search_text_changed)
         
         s_layout.addWidget(s_icon)
-        s_layout.addWidget(s_entry, stretch=1)
+        s_layout.addWidget(self._search_entry, stretch=1)
         
-        layout.addWidget(search_frame)
+        layout.addWidget(self._search_frame)
         layout.addSpacing(12)
 
-        # Avatar circle
-        avatar = QLabel(self._username[0].upper())
-        avatar.setFixedSize(36, 36)
-        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        avatar.setStyleSheet(f"""
+        self._avatar_widget = QLabel(self._username[0].upper())
+        self._avatar_widget.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._avatar_widget.setFixedSize(36, 36)
+        self._avatar_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._avatar_widget.setStyleSheet(f"""
             QLabel {{
                 background-color: {c('accent')};
                 color: #FFFFFF;
@@ -278,7 +541,8 @@ class DashboardPage(QWidget):
                 font-weight: bold;
             }}
         """)
-        layout.addWidget(avatar)
+        self._avatar_widget.mousePressEvent = self._show_profile_dropdown
+        layout.addWidget(self._avatar_widget)
 
     # ── Welcome Banner ─────────────────────────────────────
 
@@ -306,14 +570,10 @@ class DashboardPage(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 18, 24, 18)
         
-        title = QLabel(f"Good day, {self._username}")
-        title.setStyleSheet("color: #311B92; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+        self._lbl_greeting_card = QLabel(f"Loading...")
+        self._lbl_greeting_card.setStyleSheet("color: #311B92; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
         
-        desc = QLabel("You're successfully signed in to SignDesk. Your dashboard is ready.")
-        desc.setStyleSheet(f"color: {c('info')}; font-family: 'Segoe UI'; font-size: 16px;")
-        
-        layout.addWidget(title)
-        layout.addWidget(desc)
+        layout.addWidget(self._lbl_greeting_card)
 
         _add_shadow(card)
         wrapper_layout.addWidget(card)
@@ -322,7 +582,6 @@ class DashboardPage(QWidget):
     # ── Stats Row ──────────────────────────────────────────
 
     def _build_stats(self, parent_layout):
-        # Wrapper gives the shadow room to render without clipping
         wrapper = QWidget()
         wrapper.setStyleSheet("background: transparent;")
         wrapper_layout = QVBoxLayout(wrapper)
@@ -335,13 +594,18 @@ class DashboardPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
 
+        # We keep references to the value labels
+        self._lbl_sessions = QLabel("—")
+        self._lbl_confidence = QLabel("—")
+        self._lbl_signs = QLabel("—")
+
         stats_data = [
-            ("Sessions today", "3"),
-            ("Avg. accuracy",  "91%"),
-            ("Signs learned",  "24"),
+            ("Sessions Today", self._lbl_sessions),
+            ("Average Confidence",  self._lbl_confidence),
+            ("Unique Signs Recognized",  self._lbl_signs),
         ]
 
-        for label, value in stats_data:
+        for label, val_lbl in stats_data:
             card = QFrame()
             card.setObjectName("statCard")
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -364,12 +628,11 @@ class DashboardPage(QWidget):
             lbl.setStyleSheet(f"color: {c('text_primary')};")
             _set_font(lbl, size=11)
 
-            val = QLabel(value)
-            val.setStyleSheet(f"color: {c('text_primary')};")
-            _set_font(val, size=22, bold=True)
+            val_lbl.setStyleSheet(f"color: {c('text_primary')};")
+            _set_font(val_lbl, size=22, bold=True)
 
             c_layout.addWidget(lbl)
-            c_layout.addWidget(val)
+            c_layout.addWidget(val_lbl)
 
             _add_shadow(card)
             layout.addWidget(card, stretch=1)
@@ -377,34 +640,7 @@ class DashboardPage(QWidget):
         wrapper_layout.addWidget(row)
         parent_layout.addWidget(wrapper)
 
-    def _history_status(self) -> str:
-        """Return a short string describing the gesture history log status."""
-        try:
-            from modules.gesture_history.backend import get_setting, get_record_count
-            from core.database import get_connection
-
-            logging_on = get_setting("logging_enabled") == "1"
-            if not logging_on:
-                return "Disabled"
-
-            # Resolve user_id from username
-            user_id = None
-            try:
-                with get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT id FROM users WHERE username = ?", (self._username,)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        user_id = row["id"]
-            except Exception:
-                pass
-
-            count = get_record_count(user_id) if user_id is not None else 0
-            return f"{count} entr{'y' if count == 1 else 'ies'}"
-        except Exception:
-            return "Unavailable"
+    # ── System Status ──────────────────────────────────────
 
     def _build_status(self, parent_layout):
         lbl = QLabel("System Status")
@@ -412,7 +648,6 @@ class DashboardPage(QWidget):
         _set_font(lbl, size=13, bold=True)
         parent_layout.addWidget(lbl)
 
-        # Wrapper gives the shadow room to render without clipping
         wrapper = QWidget()
         wrapper.setStyleSheet("background: transparent;")
         wrapper_layout = QVBoxLayout(wrapper)
@@ -425,13 +660,17 @@ class DashboardPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
 
+        self._lbl_camera = QLabel("Loading...")
+        self._lbl_privacy = QLabel("Loading...")
+        self._lbl_history_log = QLabel("Loading...")
+
         status_items = [
-            ("Camera",       "Ready",      c('info_bg'),       c('info')),
-            ("Privacy Mode", "Local-only", "#E8F5E9",          "#2E7D32"),
-            ("History Log",  self._history_status(), c('badge_gray_bg'), c('badge_gray_fg')),
+            ("Camera",       self._lbl_camera,      c('info_bg'),       c('info')),
+            ("Privacy Mode", self._lbl_privacy,     "#E8F5E9",          "#2E7D32"),
+            ("History Log",  self._lbl_history_log, c('badge_gray_bg'), c('badge_gray_fg')),
         ]
 
-        for title, value, bg, fg in status_items:
+        for title, val_lbl, bg, fg in status_items:
             card = QFrame()
             card.setObjectName("statusCard")
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -454,7 +693,6 @@ class DashboardPage(QWidget):
             t_lbl.setStyleSheet(f"color: {c('text_primary')};")
             _set_font(t_lbl, size=11)
 
-            # Badge — use a QWidget container so QFrame/QLabel global rules can't interfere
             badge_container = QWidget()
             badge_container.setFixedHeight(28)
             badge_container.setStyleSheet(f"""
@@ -465,11 +703,10 @@ class DashboardPage(QWidget):
             badge_layout = QHBoxLayout(badge_container)
             badge_layout.setContentsMargins(14, 0, 14, 0)
 
-            v_lbl = QLabel(value)
-            v_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            v_lbl.setStyleSheet(f"color: {fg}; background: transparent; border: none;")
-            _set_font(v_lbl, size=11, bold=True)
-            badge_layout.addWidget(v_lbl)
+            val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            val_lbl.setStyleSheet(f"color: {fg}; background: transparent; border: none;")
+            _set_font(val_lbl, size=11, bold=True)
+            badge_layout.addWidget(val_lbl)
 
             c_layout.addWidget(t_lbl)
             c_layout.addWidget(badge_container, 0, Qt.AlignmentFlag.AlignLeft)
@@ -481,35 +718,23 @@ class DashboardPage(QWidget):
         parent_layout.addWidget(wrapper)
 
     def _build_how_to_use(self, parent_layout):
+        lbl = QLabel("How to Use")
+        lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        _set_font(lbl, size=13, bold=True)
+        parent_layout.addWidget(lbl)
+        
         steps = [
-            (
-                "Open Gesture Translator",
-                "Navigate to the \"Gesture Translator\" section from the main menu.",
-            ),
-            (
-                "Allow Camera Access",
-                "When prompted, allow the system to access your camera for real-time translation.",
-            ),
-            (
-                "Start Recording",
-                "Click the \"Start Recording\" button to begin capturing your gestures.",
-            ),
-            (
-                "Perform Sign Language",
-                "Make sure your hands are clearly visible in the frame as you sign.",
-            ),
-            (
-                "View Translation",
-                "The translation will appear in the result panel on the right.",
-            ),
+            ("Open Gesture Translator", "Navigate to the \"Gesture Translator\" section from the main menu."),
+            ("Allow Camera Access", "When prompted, allow the system to access your camera for real-time translation."),
+            ("Start Recording", "Click the \"Start Recording\" button to begin capturing your gestures."),
+            ("Perform Sign Language", "Make sure your hands are clearly visible in the frame as you sign."),
+            ("View Translation", "The translation will appear in the result panel on the right."),
         ]
         panel = build_steps_panel(self, steps, card_width=155)
         parent_layout.addWidget(panel)
 
-    # ── Footer ─────────────────────────────────────────────
-
     def _build_footer(self, parent_layout):
-        footer = QLabel("SignDesk v1.0.0  •  © 2025 SignDesk Project  •  All rights reserved")
+        footer = QLabel("SignDesk v1.0.0  •  © 2026 SignDesk Project  •  All rights reserved")
         footer.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
         _set_font(footer, size=11)
         parent_layout.addWidget(footer, 0, Qt.AlignmentFlag.AlignHCenter)

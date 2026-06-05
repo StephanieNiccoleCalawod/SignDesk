@@ -37,7 +37,6 @@ _ROW_BORDER  = ("#F1F5F9", "#1E1E28")
 _SECTION_DEFAULTS: dict = {
     "recognition": {
         "gesture.confidence_threshold":        60,
-        "gesture.timeout":                     2.0,
         "gesture.show_confidence_indicator":   True,
         "speech.tts_enabled":                  False,
         "speech.voice":                        "default",
@@ -49,7 +48,6 @@ _SECTION_DEFAULTS: dict = {
     },
     "interface": {
         "appearance.theme":                    "system",
-        "appearance.font_size":                "medium",
         "appearance.show_landmark_overlay":    False,
         "accessibility.screen_reader_support": False,
     },
@@ -1201,12 +1199,6 @@ class SettingsPage(QWidget):
             [("system", "System default"), ("light", "Light"), ("dark", "Dark"), ("high-contrast", "High contrast")],
             on_change=self._apply_theme,
         )
-        self._select_row(
-            card, "Font size", "Affects gesture text output",
-            "appearance.font_size",
-            [("small", "Small"), ("medium", "Medium"), ("large", "Large"), ("xl", "Extra large")],
-            on_change=self._apply_font_size,
-        )
         self._toggle_row(
             card, "Show landmark overlay", "Draw hand keypoints on webcam view",
             "appearance.show_landmark_overlay",
@@ -1227,7 +1219,6 @@ class SettingsPage(QWidget):
         self._section_title(parent_layout, "Gesture Recognition")
         card = self._card(parent_layout)
         self._slider_row(card, "Confidence threshold", "Minimum score to accept a gesture", "gesture.confidence_threshold", 40, 95, 5, lambda v: f"{int(v)}%")
-        self._slider_row(card, "Gesture timeout window", "Pause before assembling a sentence", "gesture.timeout", 0.5, 5.0, 0.5, lambda v: f"{v:.1f}s")
         self._toggle_row(card, "Show confidence indicator", "Display score badge on each gesture", "gesture.show_confidence_indicator")
 
     # ══════════════════════════════════════════════════════
@@ -1252,19 +1243,14 @@ class SettingsPage(QWidget):
 
         right = self._row(card, "Gesture history log", "Save recognized text + timestamps locally")
         self._badge(right, "Off by default", "amber")
-        var_hist = QCheckBox()
+        var_hist = ToggleSwitch()
         var_hist.setChecked(config.get("privacy.gesture_history_log", False))
-        var_hist.setStyleSheet(f"""
-            QCheckBox::indicator {{ width: 44px; height: 22px; }}
-            QCheckBox::indicator:unchecked {{ background-color: {c('border')}; border-radius: 11px; }}
-            QCheckBox::indicator:checked {{ background-color: {c('accent')}; border-radius: 11px; }}
-        """)
         from modules.gesture_history.backend import set_setting as _gh_set
         def _toggle_hist(state):
             b = bool(state)
             config.set("privacy.gesture_history_log", b)
             _gh_set("logging_enabled", "1" if b else "0")
-        var_hist.stateChanged.connect(_toggle_hist)
+        var_hist.toggled.connect(_toggle_hist)
         right.addWidget(var_hist)
         self._row_divider(card)
 

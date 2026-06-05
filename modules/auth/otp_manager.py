@@ -23,7 +23,7 @@ from core.audit_log import log_event
 # OTP EXPIRY
 # ──────────────────────────────────────────────────────────────
 
-PASSWORD_RESET_OTP_EXPIRY_MINUTES = 10
+PASSWORD_RESET_OTP_EXPIRY_MINUTES = 5
 
 
 def _get_reset_otp_expiry() -> datetime:
@@ -126,15 +126,15 @@ def verify_otp(email: str, code: str) -> tuple[bool, str]:
             return False, "Verification code has expired. Please request a new one."
 
         if stored_code != code:
-            log_event("OTP_VERIFY_FAILED", email, "Incorrect code")
+            log_event("OTP_VERIFY_FAILED", email_hash, "Incorrect code")
             return False, "Incorrect verification code."
 
-        log_event("OTP_VERIFY_SUCCESS", email)
+        log_event("OTP_VERIFY_SUCCESS", email_hash)
         return True, "Verified"
 
     except Exception as e:
         print(f"[otp] verify_otp error: {e}")
-        log_event("OTP_VERIFY_FAILED", email, "Internal error")
+        log_event("OTP_VERIFY_FAILED", hmac_hash(email, normalize=True), "Internal error")
         return False, "An unexpected error occurred. Please try again."
 
 
@@ -193,10 +193,10 @@ def update_password(email: str, new_password: str) -> tuple[bool, str]:
                 return False, "Password update failed — verification read mismatch."
 
         invalidate_otp(email)
-        log_event("PASSWORD_RESET_SUCCESS", email, "Password reset via OTP")
+        log_event("PASSWORD_RESET_SUCCESS", email_hash, "Password reset via OTP")
         return True, "Password updated successfully."
 
     except Exception as e:
         print(f"[otp] update_password error: {e}")
-        log_event("PASSWORD_RESET_FAILED", email, "Internal error")
+        log_event("PASSWORD_RESET_FAILED", hmac_hash(email, normalize=True), "Internal error")
         return False, "An unexpected error occurred. Please try again."

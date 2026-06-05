@@ -12,7 +12,7 @@
     "privacy.gesture_history_log": false,
     "privacy.local_only_processing": true,
     "accessibility.screen_reader_support": true,
-    "webcam.auto_start_on_launch": false,
+    "webcam.auto_start_on_launch": true,
     "webcam.camera_source": "builtin",
     "webcam.resolution": "720p"
 }

@@ -197,7 +197,7 @@ class GestureHistorySection(QWidget):
         layout.addStretch()
 
         # Action buttons
-        btn_refresh = QPushButton("↻ Refresh")
+        btn_refresh = QPushButton("Refresh")
         btn_refresh.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_refresh.setStyleSheet(f"""
             QPushButton {{
@@ -218,7 +218,7 @@ class GestureHistorySection(QWidget):
         
         layout.addSpacing(8)
 
-        btn_export = QPushButton("⬇ Export CSV")
+        btn_export = QPushButton("Export CSV")
         btn_export.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_export.setStyleSheet(f"""
             QPushButton {{
@@ -240,7 +240,7 @@ class GestureHistorySection(QWidget):
         
         layout.addSpacing(8)
 
-        btn_clear = QPushButton("🗑 Clear all")
+        btn_clear = QPushButton("Clear all")
         btn_clear.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_clear.setStyleSheet(f"""
             QPushButton {{

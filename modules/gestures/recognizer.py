@@ -20,7 +20,7 @@ class GestureRecognizer:
     def __init__(
         self,
         stability_frames: int = 3,
-        hold_seconds: float = 3.0
+        hold_seconds: float | None = None
     ):
         # ── Recognition pipeline ──────────────────────────────
         self._comparator = LandmarkComparator()
@@ -66,6 +66,13 @@ class GestureRecognizer:
         )
 
         # Stage 4 — Hold timer (time-level accidental gesture prevention)
+        if self._hold_seconds is None:
+            if stable_gesture is not None:
+                self._last_gesture    = stable_gesture
+                self._last_confidence = stable_score
+                return stable_gesture, stable_score
+            return None, 0.0
+
         result = self._update_hold_timer(stable_gesture, stable_score)
 
         if result is not None:

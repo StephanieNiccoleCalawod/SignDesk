@@ -283,7 +283,7 @@ class GestureDetectionPage(QWidget):
         topbar.addWidget(title)
         topbar.addStretch()
 
-        self._speech_toggle_btn = QPushButton("🔇 Live Speech: OFF")
+        self._speech_toggle_btn = QPushButton("Live Speech: OFF")
         self._speech_toggle_btn.setFixedHeight(34)
         self._speech_toggle_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._speech_toggle_btn.clicked.connect(self._toggle_speech)
@@ -301,7 +301,7 @@ class GestureDetectionPage(QWidget):
 
         # Start / Stop buttons
         btn_row = QHBoxLayout()
-        self._start_btn = QPushButton("▶  Start Detection")
+        self._start_btn = QPushButton("Start Detection")
         self._start_btn.setFixedHeight(40)
         self._start_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._start_btn.setStyleSheet(f"""
@@ -315,7 +315,7 @@ class GestureDetectionPage(QWidget):
         """)
         self._start_btn.clicked.connect(self._start_detection)
 
-        self._stop_btn = QPushButton("■  Stop Detection")
+        self._stop_btn = QPushButton("Stop Detection")
         self._stop_btn.setFixedHeight(40)
         self._stop_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._stop_btn.setEnabled(False)
@@ -367,7 +367,7 @@ class GestureDetectionPage(QWidget):
         layout.addWidget(self._cam_label, stretch=1)
 
         # Placeholder
-        self._cam_placeholder = QLabel("📸\n\nCamera Offline\n\nClick 'Start Detection' to activate your webcam.")
+        self._cam_placeholder = QLabel("Camera Offline\n\nClick 'Start Detection' to activate your webcam.")
         self._cam_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._cam_placeholder.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; font-size: 14px; border: none;")
         self._cam_placeholder.setWordWrap(True)
@@ -399,7 +399,7 @@ class GestureDetectionPage(QWidget):
         _set_font(s_lbl, 11, bold=True)
         hdr.addWidget(s_lbl)
         hdr.addStretch()
-        self._status_pill = QLabel("⏸  Detection stopped")
+        self._status_pill = QLabel("Detection stopped")
         self._status_pill.setStyleSheet(
             f"background-color: {c('badge_gray_bg')}; color: {c('badge_gray_fg')};"
             " border-radius: 10px; padding: 4px 10px; font-weight: bold; border: none;")
@@ -522,7 +522,7 @@ class GestureDetectionPage(QWidget):
         """)
         o_layout.addWidget(self._output_textbox)
 
-        f_lbl = QLabel("Finalized Sentences")
+        f_lbl = QLabel("Recognized Letters")
         f_lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
         _set_font(f_lbl, 11, bold=True)
         o_layout.addWidget(f_lbl)
@@ -553,7 +553,7 @@ class GestureDetectionPage(QWidget):
         sq.setContentsMargins(20, 14, 20, 14)
 
         sh = QHBoxLayout()
-        seq_lbl = QLabel("📋  Gesture Sequence")
+        seq_lbl = QLabel("Gesture Sequence")
         seq_lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
         _set_font(seq_lbl, 12, bold=True)
         sh.addWidget(seq_lbl)
@@ -596,13 +596,13 @@ class GestureDetectionPage(QWidget):
 
         # Header
         hdr = QHBoxLayout()
-        title = QLabel("🔊  Speech Output")
+        title = QLabel("Speech Output")
         title.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
         _set_font(title, 14, bold=True)
         hdr.addWidget(title)
         hdr.addStretch()
 
-        self._tts_status_pill = QLabel("⏸ Idle")
+        self._tts_status_pill = QLabel("Idle")
         self._tts_status_pill.setStyleSheet(
             f"background-color: {c('badge_gray_bg')}; color: {c('badge_gray_fg')};"
             " border-radius: 10px; padding: 3px 10px; font-weight: bold; border: none; font-size: 11px;")
@@ -617,7 +617,7 @@ class GestureDetectionPage(QWidget):
         voice_row.addWidget(voice_lbl)
 
         self._voice_combo = QComboBox()
-        self._voice_combo.addItems(["🔊 Default", "♀ Female", "♂ Male"])
+        self._voice_combo.addItems(["Default", "Female", "Male"])
         self._voice_combo.setFixedHeight(30)
         self._voice_combo.setStyleSheet(f"""
             QComboBox {{
@@ -639,13 +639,13 @@ class GestureDetectionPage(QWidget):
 
         # Sentences Header
         sent_hdr = QHBoxLayout()
-        sent_lbl = QLabel("Finalized Sentences")
+        sent_lbl = QLabel("Recognized Letters")
         sent_lbl.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; border: none;")
         _set_font(sent_lbl, 12, bold=True)
         sent_hdr.addWidget(sent_lbl)
         sent_hdr.addStretch()
 
-        play_all_btn = QPushButton("▶ Play All")
+        play_all_btn = QPushButton("Play All")
         play_all_btn.setFixedHeight(28)
         play_all_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         play_all_btn.setStyleSheet(f"""
@@ -719,8 +719,8 @@ class GestureDetectionPage(QWidget):
         self._stop_btn.setEnabled(True)
         self._cam_placeholder.setVisible(False)
 
-        self._set_status_pill("🔵  Detecting…", c("info_bg"), c("info"))
-        self._gesture_name_label.setText("Looking for gesture…")
+        self._set_status_pill("Detecting...", c("info_bg"), c("info"))
+        self._gesture_name_label.setText("Looking for gesture...")
         self._update_timer.start()
 
     def _stop_detection(self) -> None:
@@ -733,9 +733,9 @@ class GestureDetectionPage(QWidget):
         self._cam_placeholder.setVisible(True)
         self._cam_label.clear()
 
-        self._set_status_pill("⏸  Detection stopped", c("badge_gray_bg"), c("badge_gray_fg"))
+        self._set_status_pill("Detection stopped", c("badge_gray_bg"), c("badge_gray_fg"))
         self._gesture_label.setText("—")
-        self._gesture_name_label.setText("Waiting for gesture…")
+        self._gesture_name_label.setText("Waiting for gesture...")
         self._conf_value_label.setText("0%")
         self._conf_bar.setValue(0)
         self._hold_bar.setValue(0)
@@ -754,7 +754,7 @@ class GestureDetectionPage(QWidget):
 
     def _update_speech_toggle_ui(self) -> None:
         if self._live_speech_enabled:
-            self._speech_toggle_btn.setText("🔊 Live Speech: ON")
+            self._speech_toggle_btn.setText("Live Speech: ON")
             self._speech_toggle_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {c('success_bg')}; color: {c('success')};
@@ -763,7 +763,7 @@ class GestureDetectionPage(QWidget):
                 }}
             """)
         else:
-            self._speech_toggle_btn.setText("🔇 Live Speech: OFF")
+            self._speech_toggle_btn.setText("Live Speech: OFF")
             self._speech_toggle_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: transparent; color: {c('text_muted')};
@@ -795,7 +795,7 @@ class GestureDetectionPage(QWidget):
 
         success, frame, fps = self._camera.read_frame()
         if not success or frame is None:
-            self._set_status_pill("⚠  Camera feed interrupted", c("error_bg"), c("error"))
+            self._set_status_pill("Camera feed interrupted", c("error_bg"), c("error"))
             return
 
         self._fps_label.setText(f"FPS: {fps:.0f}")
@@ -838,12 +838,12 @@ class GestureDetectionPage(QWidget):
             self._recognizer.reset_hold()
             self._gesture_label.setText(gesture)
             self._gesture_name_label.setText(f"ASL Letter: {gesture}")
-            self._set_status_pill(f"🟢  Committed: {gesture}", c("success_bg"), c("success"))
+            self._set_status_pill(f"Committed: {gesture}", c("success_bg"), c("success"))
 
         elif current_hold is not None:
             self._gesture_label.setText(current_hold)
             self._gesture_name_label.setText(f"ASL Letter: {current_hold}")
-            self._set_status_pill(f"⏳  Holding: {current_hold}…", c("info_bg"), c("info"))
+            self._set_status_pill(f"Holding: {current_hold}...", c("info_bg"), c("info"))
 
         else:
             self._gesture_label.setText("—")
@@ -853,7 +853,7 @@ class GestureDetectionPage(QWidget):
                 self._refresh_output()
                 if self._live_speech_enabled:
                     word_assembler.add_space()
-            self._set_status_pill("Analyzing…", c("info_bg"), c("info"))
+            self._set_status_pill("Analyzing...", c("info_bg"), c("info"))
 
     def _process_no_gesture(self) -> None:
         self._gesture_label.setText("—")
@@ -864,7 +864,7 @@ class GestureDetectionPage(QWidget):
             self._refresh_output()
             if self._live_speech_enabled:
                 word_assembler.add_space()
-        self._set_status_pill("🔵  No hand detected", c("info_bg"), c("info"))
+        self._set_status_pill("No hand detected", c("info_bg"), c("info"))
 
     # ══════════════════════════════════════════════════════
     # SPEECH LOGIC
@@ -878,7 +878,7 @@ class GestureDetectionPage(QWidget):
 
         sentences = speech_buffer.get_all()
         if not sentences:
-            empty = QLabel("No finalized sentences yet.")
+            empty = QLabel("No recognized letters yet.")
             empty.setStyleSheet(f"color: {c('text_muted')}; background: transparent; border: none;")
             _set_font(empty, 11)
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -904,7 +904,7 @@ class GestureDetectionPage(QWidget):
             txt.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none; font-family: 'Consolas'; font-size: 13px;")
             r.addWidget(txt, 1)
 
-            play_btn = QPushButton("▶")
+            play_btn = QPushButton("Play")
             play_btn.setFixedSize(32, 32)
             play_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             play_btn.setStyleSheet(f"QPushButton {{ background-color: {c('accent')}; color: #FFFFFF; border: none; border-radius: 6px; font-size: 12px; }} QPushButton:hover {{ background-color: {c('accent_hover')}; }}")
@@ -925,8 +925,8 @@ class GestureDetectionPage(QWidget):
         self._populate_sentences()
 
     def _play_single(self, sentence: str) -> None:
-        self._set_tts_status("🟢 Playing", c("success_bg"), c("success"))
-        QTimer.singleShot(2500, lambda: self._set_tts_status("⏸ Idle", c("badge_gray_bg"), c("badge_gray_fg")))
+        self._set_tts_status("Playing", c("success_bg"), c("success"))
+        QTimer.singleShot(2500, lambda: self._set_tts_status("Idle", c("badge_gray_bg"), c("badge_gray_fg")))
         self._tts.speak(sentence)
 
     def _play_all(self) -> None:
@@ -988,10 +988,10 @@ class GestureDetectionPage(QWidget):
             self._conf_warning.setText("")
         elif confidence >= 0.60:
             color = c("warn")
-            self._conf_warning.setText("⚠ Improve positioning")
+            self._conf_warning.setText("Improve positioning")
         else:
             color = c("error")
-            self._conf_warning.setText("⚠ Low confidence")
+            self._conf_warning.setText("Low confidence")
             
         self._conf_bar.setStyleSheet(f"QProgressBar {{ background-color: {c('border')}; border: none; border-radius: 3px; }} QProgressBar::chunk {{ background-color: {color}; border-radius: 3px; }}")
         self._conf_value_label.setStyleSheet(f"color: {color}; border: none; background: transparent;")

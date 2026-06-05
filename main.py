@@ -23,6 +23,7 @@ class SignDeskApp(QMainWindow):
         self._layout = QVBoxLayout(self._central_widget)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self.setCentralWidget(self._central_widget)
+        self.setMinimumSize(900, 650)
         
         from modules.settings.account_backend import init_account_db
         init_account_db()
@@ -39,25 +40,13 @@ class SignDeskApp(QMainWindow):
             self._current_page = None
 
     def _set_size(self, width: int, height: int, resizable: bool = True):
-        """Resize and re-center the window."""
-        if resizable:
-            self.setMinimumSize(width, height)
-            self.setMaximumSize(16777215, 16777215)
-            self.resize(width, height)
-        else:
-            self.setMinimumSize(width, height)
-            self.setMaximumSize(16777215, 16777215)
-            self.resize(width, height)
-
-        screen = QApplication.primaryScreen().availableGeometry()
-        x = (screen.width() - width) // 2
-        y = (screen.height() - height) // 2
-        self.setGeometry(x, y, width, height)
+        """Resize and re-center the window. (Disabled to maintain maximized state)"""
+        pass
 
     def show_login(self):
         if self._current_user:
             from core.audit_log import log_event
-            log_event("LOGOUT", self._current_user)
+            log_event("LOGOUT", str(self._current_user_id or ""))
         self._current_user = None
         self._current_user_id = None
         self._clear()
@@ -196,5 +185,5 @@ if __name__ == "__main__":
     app.setStyleSheet(build_qss(dark=dark))
     
     window = SignDeskApp()
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec())
