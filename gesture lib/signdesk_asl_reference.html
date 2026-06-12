@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignDesk – ASL Reference</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Calibri', Arial, sans-serif;
+    background: #f0f0f8;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  /* ── App shell ── */
+  .app {
+    display: flex;
+    width: 100%;
+    max-width: 1100px;
+    min-height: 640px;
+    background: #f0f0f8;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #ddd;
+    box-shadow: 0 4px 24px rgba(0,0,0,.08);
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 190px;
+    background: #1a1f3b;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .logo {
+    padding: 18px 16px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+  }
+  .logo-icon {
+    width: 32px; height: 32px;
+    background: #4ade80;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-icon svg { width: 18px; height: 18px; fill: #1a1f3b; }
+  .logo-text { color: #fff; font-size: 15px; font-weight: 600; letter-spacing: .3px; }
+
+  .nav { padding: 12px 0; flex: 1; }
+  .nav-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: rgba(255,255,255,.3); padding: 8px 16px 4px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 16px; color: rgba(255,255,255,.55);
+    font-size: 13px; cursor: pointer; transition: background .15s;
+  }
+  .nav-item i { font-size: 16px; }
+  .nav-item.active { background: rgba(255,255,255,.1); color: #fff; }
+  .nav-item.active i { color: #4ade80; }
+  .nav-item:hover:not(.active) { background: rgba(255,255,255,.06); color: rgba(255,255,255,.8); }
+
+  .sidebar-foot {
+    padding: 14px 16px;
+    border-top: 1px solid rgba(255,255,255,.08);
+  }
+  .logout { color: rgba(255,100,100,.8); font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  /* ── Main ── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+  .topbar {
+    background: #fff;
+    padding: 0 20px;
+    height: 52px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #e8e8f0;
+    flex-shrink: 0;
+  }
+  .page-title { font-size: 16px; font-weight: 600; color: #1a1f3b; }
+
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+  /* Search box */
+  .search-wrap {
+    display: flex; align-items: center; gap: 6px;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    border-radius: 8px; padding: 5px 10px;
+  }
+  .search-wrap i { font-size: 14px; color: #9ca3af; }
+  .search-wrap input {
+    border: none; background: transparent; font-size: 12px;
+    color: #374151; outline: none; width: 140px;
+    font-family: inherit;
+  }
+  .search-wrap input::placeholder { color: #9ca3af; }
+
+  /* Filter pills */
+  .filter-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 10px 20px;
+    border-bottom: 1px solid #e8e8f0;
+    background: #fff;
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+  .filter-label { font-size: 11px; color: #9ca3af; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; margin-right: 4px; white-space: nowrap; }
+  .filter-pill {
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: 1.5px solid #e5e7eb; background: #fff; color: #6b7280;
+    transition: all .15s; white-space: nowrap;
+  }
+  .filter-pill.active { background: #1a1f3b; color: #fff; border-color: #1a1f3b; }
+  .filter-pill:hover:not(.active) { border-color: #4ade80; color: #1a1f3b; }
+
+  /* Grid content */
+  .content-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  /* Section headers */
+  .section-row {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 14px;
+  }
+  .section-row + .grid { margin-bottom: 28px; }
+  .section-eyebrow {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: #9ca3af; font-weight: 600;
+  }
+  .section-line { flex: 1; height: 1px; background: #e8e8f0; }
+
+  /* Letter grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  /* Letter card */
+  .letter-card {
+    background: #fff;
+    border: 1.5px solid #e8e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color .18s, transform .18s, box-shadow .18s;
+    position: relative;
+  }
+  .letter-card:hover {
+    border-color: #4ade80;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(74,222,128,.15);
+  }
+  .letter-card.selected {
+    border-color: #4ade80;
+    box-shadow: 0 0 0 3px rgba(74,222,128,.25);
+  }
+  .letter-card img {
+    width: 100%;
+    aspect-ratio: 234 / 277;
+    object-fit: cover;
+    display: block;
+    background: #f8f8fc;
+  }
+  .letter-card .card-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px;
+  }
+  .letter-char {
+    font-size: 20px; font-weight: 700; color: #1a1f3b; line-height: 1;
+  }
+  .practice-btn {
+    background: transparent; border: none; cursor: pointer;
+    color: #9ca3af; font-size: 14px; padding: 2px;
+    transition: color .15s;
+  }
+  .letter-card:hover .practice-btn { color: #4ade80; }
+
+  /* Selected detail overlay */
+  .detail-bar {
+    display: none;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    align-items: center;
+    gap: 16px;
+  }
+  .detail-bar.visible { display: flex; }
+  .detail-bar img {
+    width: 72px; height: 85px; object-fit: cover;
+    border-radius: 6px; border: 1.5px solid #bbf7d0;
+    flex-shrink: 0;
+  }
+  .detail-info { flex: 1; min-width: 0; }
+  .detail-char { font-size: 36px; font-weight: 700; color: #1a1f3b; line-height: 1; }
+  .detail-label { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: #9ca3af; font-weight: 600; margin-bottom: 4px; }
+  .detail-tip { font-size: 12px; color: #15803d; line-height: 1.5; margin-top: 4px; }
+  .detail-close {
+    background: none; border: none; cursor: pointer;
+    color: #9ca3af; font-size: 18px; flex-shrink: 0;
+    padding: 4px;
+  }
+  .detail-close:hover { color: #1a1f3b; }
+  .go-practice-btn {
+    background: #4ade80; color: #14532d;
+    border: none; border-radius: 8px;
+    font-size: 12px; font-weight: 600;
+    padding: 8px 14px; cursor: pointer;
+    display: flex; align-items: center; gap: 5px;
+    flex-shrink: 0;
+    transition: background .15s;
+  }
+  .go-practice-btn:hover { background: #22c55e; }
+
+  /* Empty state */
+  .empty-state {
+    display: none;
+    text-align: center;
+    padding: 48px 24px;
+    color: #9ca3af;
+  }
+  .empty-state i { font-size: 36px; margin-bottom: 10px; display: block; }
+  .empty-state p { font-size: 13px; }
+  .empty-state.visible { display: block; }
+
+  /* Scrollbar */
+  .content-area::-webkit-scrollbar { width: 6px; }
+  .content-area::-webkit-scrollbar-track { background: transparent; }
+  .content-area::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+      </div>
+      <span class="logo-text">SignDesk</span>
+    </div>
+    <div class="nav">
+      <div class="nav-item"><i class="ti ti-layout-dashboard"></i>Dashboard</div>
+      <div class="nav-label">Learn</div>
+      <div class="nav-item"><i class="ti ti-camera"></i>Camera Practice</div>
+      <div class="nav-item"><i class="ti ti-cards"></i>Flashcard Quiz</div>
+      <div class="nav-item active"><i class="ti ti-book"></i>ASL Reference</div>
+      <div class="nav-label">Account</div>
+      <div class="nav-item"><i class="ti ti-settings"></i>Settings</div>
+    </div>
+    <div class="sidebar-foot">
+      <div class="logout"><i class="ti ti-logout"></i>Log out</div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <span class="page-title">ASL Reference</span>
+      <div class="topbar-right">
+        <div class="search-wrap">
+          <i class="ti ti-search"></i>
+          <input type="text" id="searchInput" placeholder="Search letter…">
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter row -->
+    <div class="filter-row">
+      <span class="filter-label">Filter</span>
+      <button class="filter-pill active" data-filter="all">All (A–Z)</button>
+      <button class="filter-pill" data-filter="A-G">A – G</button>
+      <button class="filter-pill" data-filter="H-N">H – N</button>
+      <button class="filter-pill" data-filter="O-U">O – U</button>
+      <button class="filter-pill" data-filter="V-Z">V – Z</button>
+    </div>
+
+    <!-- Content -->
+    <div class="content-area">
+
+      <!-- Detail bar (shown on click) -->
+      <div class="detail-bar" id="detailBar">
+        <img id="detailImg" src="" alt="">
+        <div class="detail-info">
+          <div class="detail-label">Selected letter</div>
+          <div class="detail-char" id="detailChar">A</div>
+          <div class="detail-tip" id="detailTip"></div>
+        </div>
+        <button class="go-practice-btn"><i class="ti ti-camera"></i>Practice this</button>
+        <button class="detail-close" id="detailClose"><i class="ti ti-x"></i></button>
+      </div>
+
+      <!-- Grid renders here -->
+      <div id="gridContainer"></div>
+
+      <!-- Empty state -->
+      <div class="empty-state" id="emptyState">
+        <i class="ti ti-mood-empty"></i>
+        <p>No letters match your search.</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = 'https://alphabetizer.flap.tv/lists/images';
+
+const tips = {
+  A: 'Closed fist with thumb resting on the side.',
+  B: 'Flat hand, fingers together, thumb folded across palm.',
+  C: 'Curved hand in a "C" shape, fingers and thumb facing each other.',
+  D: 'Index finger points up, other fingers curve to meet thumb.',
+  E: 'All fingers bent forward, thumb tucked under.',
+  F: 'Index finger and thumb form a circle; remaining fingers spread up.',
+  G: 'Index finger and thumb point horizontally to the side.',
+  H: 'Index and middle fingers extended horizontally, together.',
+  I: 'Pinky finger raised; other fingers and thumb curled.',
+  J: 'Pinky up, then draw a "J" curve in the air.',
+  K: 'Index and middle fingers up in a V, thumb between them.',
+  L: 'Index finger up, thumb out — classic "L" shape.',
+  M: 'Three fingers folded over the tucked thumb.',
+  N: 'Two fingers folded over the tucked thumb.',
+  O: 'All fingers and thumb curve to meet in an "O" shape.',
+  P: 'Like K but pointing downward.',
+  Q: 'Like G but pointing downward.',
+  R: 'Index and middle fingers crossed.',
+  S: 'Closed fist with thumb over fingers.',
+  T: 'Thumb between index and middle fingers.',
+  U: 'Index and middle fingers extended together, pointing up.',
+  V: 'Index and middle fingers spread in a "V" / peace sign.',
+  W: 'Three fingers (index, middle, ring) spread up.',
+  X: 'Index finger hooks/curls forward.',
+  Y: 'Pinky and thumb extended outward.',
+  Z: 'Index finger traces a "Z" in the air.',
+};
+
+const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+const ranges = {
+  'all':  alphabet,
+  'A-G':  alphabet.slice(0, 7),
+  'H-N':  alphabet.slice(7, 14),
+  'O-U':  alphabet.slice(14, 21),
+  'V-Z':  alphabet.slice(21),
+};
+const rangeLabels = {
+  'all': 'Full Alphabet',
+  'A-G': 'A – G',
+  'H-N': 'H – N',
+  'O-U': 'O – U',
+  'V-Z': 'V – Z',
+};
+
+let currentFilter = 'all';
+let currentSearch = '';
+let selectedLetter = null;
+
+function imgUrl(letter) {
+  return `${BASE}/Sign_Language_${letter}.jpg`;
+}
+
+function getVisible() {
+  const pool = ranges[currentFilter];
+  const q = currentSearch.trim().toUpperCase();
+  if (!q) return pool;
+  return pool.filter(l => l.includes(q));
+}
+
+function render() {
+  const visible = getVisible();
+  const container = document.getElementById('gridContainer');
+  const empty = document.getElementById('emptyState');
+
+  container.innerHTML = '';
+
+  if (visible.length === 0) {
+    empty.classList.add('visible');
+    return;
+  }
+  empty.classList.remove('visible');
+
+  // Group into sections only if 'all' filter and no search
+  if (currentFilter === 'all' && !currentSearch.trim()) {
+    Object.entries(ranges).filter(([k]) => k !== 'all').forEach(([key, letters]) => {
+      const row = document.createElement('div');
+      row.className = 'section-row';
+      row.innerHTML = `<span class="section-eyebrow">${rangeLabels[key]}</span><div class="section-line"></div>`;
+      container.appendChild(row);
+      const grid = buildGrid(letters);
+      container.appendChild(grid);
+    });
+  } else {
+    const grid = buildGrid(visible);
+    container.appendChild(grid);
+  }
+}
+
+function buildGrid(letters) {
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  letters.forEach(letter => {
+    const card = document.createElement('div');
+    card.className = 'letter-card' + (selectedLetter === letter ? ' selected' : '');
+    card.dataset.letter = letter;
+    card.innerHTML = `
+      <img src="${imgUrl(letter)}" alt="ASL sign for ${letter}" loading="lazy">
+      <div class="card-foot">
+        <span class="letter-char">${letter}</span>
+        <button class="practice-btn" title="Practice ${letter}"><i class="ti ti-player-play-filled"></i></button>
+      </div>
+    `;
+    card.addEventListener('click', () => selectLetter(letter));
+    grid.appendChild(card);
+  });
+  return grid;
+}
+
+function selectLetter(letter) {
+  selectedLetter = letter;
+  const bar = document.getElementById('detailBar');
+  document.getElementById('detailImg').src = imgUrl(letter);
+  document.getElementById('detailImg').alt = `ASL sign for ${letter}`;
+  document.getElementById('detailChar').textContent = letter;
+  document.getElementById('detailTip').textContent = tips[letter] || '';
+  bar.classList.add('visible');
+  // Scroll bar into view
+  bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  // Re-render to update selected state
+  renderCards();
+}
+
+function renderCards() {
+  // Just update selected class without full re-render
+  document.querySelectorAll('.letter-card').forEach(card => {
+    card.classList.toggle('selected', card.dataset.letter === selectedLetter);
+  });
+}
+
+document.getElementById('detailClose').addEventListener('click', () => {
+  selectedLetter = null;
+  document.getElementById('detailBar').classList.remove('visible');
+  renderCards();
+});
+
+// Filter pills
+document.querySelectorAll('.filter-pill').forEach(pill => {
+  pill.addEventListener('click', () => {
+    document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+    pill.classList.add('active');
+    currentFilter = pill.dataset.filter;
+    render();
+  });
+});
+
+// Search
+document.getElementById('searchInput').addEventListener('input', e => {
+  currentSearch = e.target.value;
+  // Auto-switch to "all" when searching
+  if (currentSearch.trim()) {
+    currentFilter = 'all';
+    document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+    document.querySelector('[data-filter="all"]').classList.add('active');
+  }
+  render();
+});
+
+render();
+</script>
+</body>
+</html>

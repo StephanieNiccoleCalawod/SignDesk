@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignDesk – Flashcard Quiz</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Calibri', Arial, sans-serif; background: #f0f0f8; min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 24px; }
+  .app { display: flex; width: 100%; max-width: 1100px; min-height: 640px; background: #f0f0f8; border-radius: 12px; overflow: hidden; border: 1px solid #ddd; box-shadow: 0 4px 24px rgba(0,0,0,.08); }
+  .sidebar { width: 190px; background: #1a1f3b; display: flex; flex-direction: column; flex-shrink: 0; }
+  .logo { padding: 18px 16px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .logo-icon { width: 32px; height: 32px; background: #4ade80; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+  .logo-icon svg { width: 18px; height: 18px; fill: #1a1f3b; }
+  .logo-text { color: #fff; font-size: 15px; font-weight: 600; letter-spacing: .3px; }
+  .nav { padding: 12px 0; flex: 1; }
+  .nav-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: rgba(255,255,255,.3); padding: 8px 16px 4px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 16px; color: rgba(255,255,255,.55); font-size: 13px; cursor: pointer; transition: background .15s; }
+  .nav-item i { font-size: 16px; }
+  .nav-item.active { background: rgba(255,255,255,.1); color: #fff; }
+  .nav-item.active i { color: #4ade80; }
+  .nav-item:hover:not(.active) { background: rgba(255,255,255,.06); color: rgba(255,255,255,.8); }
+  .sidebar-foot { padding: 14px 16px; border-top: 1px solid rgba(255,255,255,.08); }
+  .logout { color: rgba(255,100,100,.8); font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  .topbar { background: #fff; padding: 0 20px; height: 52px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e8e8f0; flex-shrink: 0; }
+  .page-title { font-size: 16px; font-weight: 600; color: #1a1f3b; }
+  .session-badge { display: flex; align-items: center; gap: 12px; }
+  .progress-wrap { display: flex; align-items: center; gap: 8px; }
+  .progress-label { font-size: 12px; color: #666; }
+  .progress-bar { width: 120px; height: 6px; background: #e8e8f0; border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #4ade80; border-radius: 3px; transition: width .4s ease; }
+  .score-pill { background: #f0f9f4; border: 1px solid #bbf7d0; color: #15803d; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 20px; }
+  .content { flex: 1; display: grid; grid-template-columns: 1fr 220px; gap: 16px; padding: 16px; overflow: hidden; }
+  .card { background: #fff; border-radius: 12px; border: 1px solid #e8e8f0; padding: 16px; display: flex; flex-direction: column; }
+  .card-label { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: #9ca3af; margin-bottom: 12px; font-weight: 600; }
+  .quiz-card { align-items: stretch; }
+  .screen { display: none; flex-direction: column; flex: 1; }
+  .screen.active { display: flex; }
+
+  /* Setup */
+  .setup-inner { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+  .setup-title { font-size: 18px; font-weight: 700; color: #1a1f3b; }
+  .setup-sub { font-size: 13px; color: #6b7280; text-align: center; max-width: 320px; line-height: 1.5; }
+  .mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; max-width: 380px; }
+  .mode-btn { border: 2px solid #e8e8f0; border-radius: 10px; background: #fff; cursor: pointer; padding: 0; text-align: left; transition: border-color .15s, background .15s; overflow: hidden; }
+  .mode-btn.selected { border-color: #4ade80; background: #f0fdf4; }
+  .mode-btn-preview { width: 100%; height: 90px; overflow: hidden; position: relative; background: #1a1f3b; }
+  .mode-btn-preview img { width: 100%; height: 100%; object-fit: cover; opacity: 0.7; }
+  .mode-btn-preview .preview-label { position: absolute; bottom: 6px; left: 6px; background: rgba(26,31,59,.85); color: #4ade80; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; padding: 2px 7px; border-radius: 4px; }
+  /* preview strip for identify mode — shows 3 images */
+  .mode-btn-preview.multi { display: flex; }
+  .mode-btn-preview.multi img { flex: 1; height: 100%; object-fit: cover; }
+  .mode-btn-body { padding: 10px 12px 12px; }
+  .mode-btn i { font-size: 22px; color: #4ade80; display: block; margin-bottom: 4px; }
+  .mode-btn strong { font-size: 13px; color: #1a1f3b; display: block; }
+  .mode-btn span { font-size: 11px; color: #6b7280; line-height: 1.4; }
+  .len-btn { border: 2px solid #e8e8f0; border-radius: 10px; background: #fff; cursor: pointer; padding: 8px 18px; text-align: center; transition: border-color .15s, background .15s; }
+  .len-btn.selected { border-color: #4ade80; background: #f0fdf4; }
+  .len-btn strong { font-size: 14px; color: #1a1f3b; }
+  .start-btn { background: #4ade80; color: #14532d; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; padding: 12px 32px; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background .15s; }
+  .start-btn:hover { background: #22c55e; }
+  .start-btn i { font-size: 18px; }
+
+  /* Flip card */
+  .flip-wrap { perspective: 900px; width: 100%; max-width: 300px; height: 240px; cursor: pointer; flex-shrink: 0; }
+  .flip-inner { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform .5s cubic-bezier(.4,0,.2,1); }
+  .flip-inner.flipped { transform: rotateY(180deg); }
+  .flip-face { position: absolute; inset: 0; backface-visibility: hidden; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+  .flip-front { background: #1a1f3b; border: 2px solid #2d3561; overflow: hidden; }
+  /* Hint image layer on the front face */
+  .flip-front-hint-img {
+    position: absolute; inset: 0;
+    background-size: cover; background-position: center;
+    opacity: 0; transition: opacity .4s;
+    filter: blur(3px) brightness(0.25);
+    border-radius: 10px;
+  }
+  .flip-front-hint-img.showing { opacity: 1; }
+  .flip-front-content { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .letter-display { font-size: 100px; font-weight: 700; color: #4ade80; line-height: 1; transition: opacity .3s; }
+  .flip-hint { font-size: 11px; color: rgba(255,255,255,.35); letter-spacing: .5px; }
+  /* Hint button on front */
+  .hint-btn {
+    position: absolute; bottom: 10px; right: 10px; z-index: 3;
+    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
+    color: rgba(255,255,255,.6); font-size: 10px; font-weight: 600;
+    border-radius: 6px; padding: 4px 9px; cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+    transition: background .15s, color .15s;
+    letter-spacing: .3px;
+  }
+  .hint-btn:hover { background: rgba(255,255,255,.22); color: #fff; }
+  .hint-btn i { font-size: 12px; }
+
+  /* Flip back */
+  .flip-back { background: #fff; border: 2px solid #bbf7d0; transform: rotateY(180deg); overflow: hidden; padding: 0; justify-content: flex-start; }
+  .flip-back-img { width: 100%; flex: 1; object-fit: cover; display: block; min-height: 0; }
+  .flip-back-footer {
+    width: 100%; padding: 7px 10px;
+    background: #f0fdf4;
+    border-top: 1px solid #bbf7d0;
+    display: flex; flex-direction: column; gap: 2px;
+    flex-shrink: 0;
+  }
+  .flip-back-label { font-size: 12px; font-weight: 700; color: #1a1f3b; }
+  .flip-back-tip { font-size: 10px; color: #15803d; line-height: 1.4; }
+
+  /* Identify */
+  .identify-wrap { width: 100%; max-width: 300px; border-radius: 12px; border: 2px solid #e8e8f0; overflow: hidden; height: 200px; flex-shrink: 0; position: relative; }
+  .identify-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* Tip bar revealed after answering */
+  .identify-tip-bar {
+    display: none;
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(240,253,244,.95); border-top: 1px solid #bbf7d0;
+    padding: 5px 10px;
+    font-size: 10px; color: #15803d; line-height: 1.4;
+    animation: slideUp .25s ease;
+  }
+  .identify-tip-bar.visible { display: block; }
+  @keyframes slideUp { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .choices-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; max-width: 340px; }
+  .choice-btn { padding: 10px 6px; border-radius: 8px; border: 2px solid #e8e8f0; background: #fff; font-size: 18px; font-weight: 700; color: #1a1f3b; cursor: pointer; transition: border-color .15s, background .15s, transform .1s; }
+  .choice-btn:hover:not(:disabled) { border-color: #4ade80; background: #f0fdf4; transform: translateY(-1px); }
+  .choice-btn.correct { border-color: #4ade80; background: #f0fdf4; color: #15803d; }
+  .choice-btn.wrong   { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+  .choice-btn:disabled { cursor: default; }
+
+  /* Nav buttons */
+  .quiz-nav { display: flex; gap: 8px; width: 100%; max-width: 340px; }
+  .btn { flex: 1; padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background .15s; }
+  .btn i { font-size: 15px; }
+  .btn-skip { background: #f3f4f6; color: #6b7280; }
+  .btn-skip:hover { background: #e5e7eb; }
+  .btn-next { background: #4ade80; color: #14532d; }
+  .btn-next:hover { background: #22c55e; }
+  .btn-next:disabled { background: #d1d5db; color: #9ca3af; cursor: default; }
+  .btn-missed { background: #fef2f2; color: #991b1b; }
+  .btn-missed:hover { background: #fee2e2; }
+
+  /* Quiz screen inner */
+  .quiz-inner { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .mode-tag { display: inline-flex; align-items: center; gap: 5px; background: #f3f4f6; border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 600; color: #374151; }
+  .mode-tag i { font-size: 13px; color: #4ade80; }
+
+  /* Results */
+  .results-inner { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+  .results-ring { width: 110px; height: 110px; border-radius: 50%; background: conic-gradient(#4ade80 0%, #e8e8f0 0%); display: flex; align-items: center; justify-content: center; position: relative; }
+  .results-ring::before { content: ''; width: 80px; height: 80px; background: #fff; border-radius: 50%; position: absolute; }
+  .results-pct { font-size: 22px; font-weight: 700; color: #1a1f3b; position: relative; z-index: 1; }
+  .results-title { font-size: 18px; font-weight: 700; color: #1a1f3b; }
+  .results-sub { font-size: 13px; color: #6b7280; }
+  .results-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%; max-width: 300px; }
+  .stat-box { background: #f8f8fc; border-radius: 8px; padding: 10px; text-align: center; }
+  .stat-val { font-size: 22px; font-weight: 700; color: #1a1f3b; }
+  .stat-lbl { font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+  .review-list { display: flex; flex-wrap: wrap; gap: 6px; max-width: 300px; justify-content: center; }
+  .review-chip { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+  .review-chip.missed { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
+  .review-chip.got    { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+  /* Results missed review row with images */
+  .missed-review-row { display: flex; flex-wrap: wrap; gap: 8px; max-width: 320px; justify-content: center; }
+  .missed-card {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    background: #fff; border: 1.5px solid #fca5a5; border-radius: 8px;
+    overflow: hidden; width: 60px;
+  }
+  .missed-card img { width: 60px; height: 60px; object-fit: cover; display: block; }
+  .missed-card-lbl { font-size: 12px; font-weight: 700; color: #991b1b; padding-bottom: 4px; }
+
+  .restart-btn { background: #1a1f3b; color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; padding: 12px 28px; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background .15s; }
+  .restart-btn:hover { background: #2d3561; }
+
+  /* Side panel */
+  .side-panel { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+  .status-section { margin-bottom: 14px; }
+  .status-section:last-child { margin-bottom: 0; }
+  .section-title { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: #9ca3af; font-weight: 600; margin-bottom: 8px; }
+  .score-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .score-box { background: #f8f8fc; border-radius: 8px; padding: 8px; text-align: center; }
+  .score-val { font-size: 18px; font-weight: 700; color: #1a1f3b; }
+  .score-lbl { font-size: 10px; color: #9ca3af; margin-top: 1px; }
+  .streak-row { display: flex; align-items: center; gap: 8px; }
+  .streak-val { font-size: 28px; font-weight: 700; color: #f97316; }
+  .streak-label { font-size: 11px; color: #6b7280; line-height: 1.4; }
+  .feedback-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 8px; display: flex; align-items: center; gap: 7px; }
+  .feedback-box.wrong-fb { background: #fef2f2; border-color: #fca5a5; }
+  .feedback-box.neutral-fb { background: #f8f8fc; border-color: #e8e8f0; }
+  .feedback-icon { width: 24px; height: 24px; border-radius: 50%; background: #4ade80; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .feedback-icon.wrong-icon { background: #fca5a5; }
+  .feedback-icon.neutral-icon { background: #e8e8f0; }
+  .feedback-icon i { font-size: 13px; color: #14532d; }
+  .feedback-icon.wrong-icon i { color: #991b1b; }
+  .feedback-icon.neutral-icon i { color: #6b7280; }
+  .feedback-text { font-size: 11px; color: #15803d; font-weight: 600; line-height: 1.3; }
+  .feedback-text.wrong-text { color: #991b1b; }
+  .feedback-text.neutral-text { color: #374151; }
+  .feedback-sub { font-size: 10px; color: #4ade80; font-weight: 400; }
+  .feedback-sub.wrong-sub { color: #f97316; }
+  .feedback-sub.neutral-sub { color: #9ca3af; }
+  .letter-tracker { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tracker-dot { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; background: #f3f4f6; color: #9ca3af; transition: background .2s; }
+  .tracker-dot.current { background: #1a1f3b; color: #4ade80; }
+  .tracker-dot.correct { background: #4ade80; color: #14532d; }
+  .tracker-dot.wrong   { background: #fca5a5; color: #991b1b; }
+  .tracker-dot.skipped { background: #e5e7eb; color: #6b7280; }
+  .side-panel::-webkit-scrollbar { width: 4px; }
+  .side-panel::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+      </div>
+      <span class="logo-text">SignDesk</span>
+    </div>
+    <div class="nav">
+      <div class="nav-item"><i class="ti ti-layout-dashboard"></i>Dashboard</div>
+      <div class="nav-label">Learn</div>
+      <div class="nav-item"><i class="ti ti-camera"></i>Camera Practice</div>
+      <div class="nav-item active"><i class="ti ti-cards"></i>Flashcard Quiz</div>
+      <div class="nav-item"><i class="ti ti-book"></i>ASL Reference</div>
+      <div class="nav-label">Account</div>
+      <div class="nav-item"><i class="ti ti-settings"></i>Settings</div>
+    </div>
+    <div class="sidebar-foot">
+      <div class="logout"><i class="ti ti-logout"></i>Log out</div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <span class="page-title">Flashcard Quiz</span>
+      <div class="session-badge">
+        <div class="progress-wrap">
+          <span class="progress-label" id="progressLabel">Card 0 of 0</span>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+        </div>
+        <div class="score-pill" id="topScore">0 correct</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <!-- Quiz card -->
+      <div class="card quiz-card">
+
+        <!-- Setup screen -->
+        <div class="screen active" id="screenSetup">
+          <div class="card-label">Quiz Setup</div>
+          <div class="setup-inner">
+            <div style="text-align:center">
+              <div class="setup-title">Choose your quiz mode</div>
+              <p class="setup-sub">Pick how you want to be tested, then start.</p>
+            </div>
+            <div class="mode-grid">
+              <button class="mode-btn selected" data-mode="recall" onclick="selectMode(this)">
+                <div class="mode-btn-preview">
+                  <img id="previewRecall" src="" alt="ASL sign preview">
+                  <span class="preview-label">See letter → flip for sign</span>
+                </div>
+                <div class="mode-btn-body">
+                  <i class="ti ti-letter-a"></i>
+                  <strong>Letter → Sign</strong>
+                  <span>See a letter, flip to reveal the hand sign.</span>
+                </div>
+              </button>
+              <button class="mode-btn" data-mode="identify" onclick="selectMode(this)">
+                <div class="mode-btn-preview multi" id="previewIdentifyStrip">
+                  <!-- filled by JS -->
+                </div>
+                <div class="mode-btn-body">
+                  <i class="ti ti-hand-click"></i>
+                  <strong>Sign → Letter</strong>
+                  <span>See a hand sign, pick the correct letter.</span>
+                </div>
+              </button>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+              <span style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.6px;font-weight:600">Cards per session</span>
+              <div style="display:flex;gap:8px">
+                <button class="len-btn selected" id="len10" onclick="selectLen(10,this)"><strong>10</strong></button>
+                <button class="len-btn" id="len26" onclick="selectLen(26,this)"><strong>All 26</strong></button>
+              </div>
+            </div>
+            <button class="start-btn" onclick="startQuiz()">
+              <i class="ti ti-player-play-filled"></i>Start Quiz
+            </button>
+          </div>
+        </div>
+
+        <!-- Quiz screen -->
+        <div class="screen" id="screenQuiz">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div class="card-label" style="margin:0" id="quizModeLabel">Letter → Sign</div>
+            <span class="mode-tag" id="modeTag"><i class="ti ti-refresh"></i>Flip to reveal</span>
+          </div>
+
+          <!-- Recall mode -->
+          <div id="recallMode" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px">
+            <div class="flip-wrap" onclick="flipCard(event)">
+              <div class="flip-inner" id="flipInner">
+                <!-- Front: letter + hint overlay -->
+                <div class="flip-face flip-front">
+                  <div class="flip-front-hint-img" id="hintImgLayer"></div>
+                  <div class="flip-front-content">
+                    <div class="letter-display" id="recallLetter">A</div>
+                    <div class="flip-hint">tap to see the sign</div>
+                  </div>
+                  <button class="hint-btn" id="hintBtn" onclick="toggleHint(event)">
+                    <i class="ti ti-eye"></i>Hint
+                  </button>
+                </div>
+                <!-- Back: full image + tip -->
+                <div class="flip-face flip-back">
+                  <img class="flip-back-img" id="recallImg" src="" alt="ASL sign">
+                  <div class="flip-back-footer">
+                    <div class="flip-back-label" id="recallBackLabel">Sign for A</div>
+                    <div class="flip-back-tip" id="recallBackTip"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="quiz-nav" id="recallNav">
+              <button class="btn btn-skip" id="recallSkipBtn" onclick="skipCard()"><i class="ti ti-arrow-right"></i>Skip</button>
+              <button class="btn btn-next" id="recallGotBtn" style="display:none" onclick="markRecall(true)"><i class="ti ti-check"></i>Got it</button>
+              <button class="btn btn-missed" id="recallMissBtn" style="display:none" onclick="markRecall(false)"><i class="ti ti-x"></i>Missed</button>
+            </div>
+          </div>
+
+          <!-- Identify mode -->
+          <div id="identifyMode" style="flex:1;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px">
+            <div class="identify-wrap">
+              <img id="identifyImg" src="" alt="ASL sign">
+              <div class="identify-tip-bar" id="identifyTipBar"></div>
+            </div>
+            <div class="choices-grid" id="choicesGrid"></div>
+            <div class="quiz-nav">
+              <button class="btn btn-skip" onclick="skipCard()"><i class="ti ti-arrow-right"></i>Skip</button>
+              <button class="btn btn-next" id="nextBtn" disabled onclick="nextCard()"><i class="ti ti-chevron-right"></i>Next</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Results screen -->
+        <div class="screen" id="screenResults">
+          <div class="card-label">Quiz Complete</div>
+          <div class="results-inner">
+            <div class="results-ring" id="resultsRing">
+              <span class="results-pct" id="resultsPct">0%</span>
+            </div>
+            <div class="results-title" id="resultsTitle">Nice work!</div>
+            <div class="results-sub" id="resultsSub"></div>
+            <div class="results-stats">
+              <div class="stat-box"><div class="stat-val" id="rCorrect">0</div><div class="stat-lbl">Correct</div></div>
+              <div class="stat-box"><div class="stat-val" id="rMissed">0</div><div class="stat-lbl">Missed</div></div>
+              <div class="stat-box"><div class="stat-val" id="rSkipped">0</div><div class="stat-lbl">Skipped</div></div>
+            </div>
+            <div style="text-align:center;width:100%;max-width:320px">
+              <div class="section-title" style="margin-bottom:8px">Missed letters</div>
+              <div class="missed-review-row" id="missedList"></div>
+            </div>
+            <button class="restart-btn" onclick="goSetup()"><i class="ti ti-refresh"></i>Try again</button>
+          </div>
+        </div>
+
+      </div><!-- /quiz-card -->
+
+      <!-- Side panel -->
+      <div class="side-panel">
+        <div class="card" style="flex-shrink:0">
+          <div class="status-section">
+            <div class="section-title">Session score</div>
+            <div class="score-grid">
+              <div class="score-box"><div class="score-val" id="sideCorrect">0</div><div class="score-lbl">Correct</div></div>
+              <div class="score-box"><div class="score-val" id="sideMissed">0</div><div class="score-lbl">Missed</div></div>
+              <div class="score-box" style="grid-column:1/-1"><div class="score-val" id="sideAccuracy">—</div><div class="score-lbl">Accuracy</div></div>
+            </div>
+          </div>
+          <div class="status-section">
+            <div class="section-title">Current streak</div>
+            <div class="streak-row">
+              <span style="font-size:22px">🔥</span>
+              <span class="streak-val" id="streakVal">0</span>
+              <div class="streak-label">correct<br>in a row</div>
+            </div>
+          </div>
+          <div class="status-section">
+            <div class="section-title">Feedback</div>
+            <div class="feedback-box neutral-fb" id="feedbackBox">
+              <div class="feedback-icon neutral-icon" id="feedbackIcon"><i class="ti ti-cards" id="feedbackIconI"></i></div>
+              <div>
+                <div class="feedback-text neutral-text" id="feedbackText">Ready to go!</div>
+                <div class="feedback-sub neutral-sub" id="feedbackSub">Pick a mode and start</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="flex:1;min-height:0;overflow-y:auto">
+          <div class="card-label">Progress tracker</div>
+          <div class="letter-tracker" id="letterTracker"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = 'https://alphabetizer.flap.tv/lists/images';
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+const imgUrl = l => `${BASE}/Sign_Language_${l}.jpg`;
+
+// Tips from ASL Reference
+const TIPS = {
+  A: 'Closed fist with thumb resting on the side.',
+  B: 'Flat hand, fingers together, thumb folded across palm.',
+  C: 'Curved hand in a "C" shape, fingers and thumb facing each other.',
+  D: 'Index finger points up, other fingers curve to meet thumb.',
+  E: 'All fingers bent forward, thumb tucked under.',
+  F: 'Index finger and thumb form a circle; remaining fingers spread up.',
+  G: 'Index finger and thumb point horizontally to the side.',
+  H: 'Index and middle fingers extended horizontally, together.',
+  I: 'Pinky finger raised; other fingers and thumb curled.',
+  J: 'Pinky up, then draw a "J" curve in the air.',
+  K: 'Index and middle fingers up in a V, thumb between them.',
+  L: 'Index finger up, thumb out — classic "L" shape.',
+  M: 'Three fingers folded over the tucked thumb.',
+  N: 'Two fingers folded over the tucked thumb.',
+  O: 'All fingers and thumb curve to meet in an "O" shape.',
+  P: 'Like K but pointing downward.',
+  Q: 'Like G but pointing downward.',
+  R: 'Index and middle fingers crossed.',
+  S: 'Closed fist with thumb over fingers.',
+  T: 'Thumb between index and middle fingers.',
+  U: 'Index and middle fingers extended together, pointing up.',
+  V: 'Index and middle fingers spread in a "V" / peace sign.',
+  W: 'Three fingers (index, middle, ring) spread up.',
+  X: 'Index finger hooks/curls forward.',
+  Y: 'Pinky and thumb extended outward.',
+  Z: 'Index finger traces a "Z" in the air.',
+};
+
+let mode = 'recall', deckSize = 10;
+let deck = [], idx = 0, results = [], flipped = false, answered = false, streak = 0;
+let hintShowing = false;
+
+// Populate setup previews
+(function initPreviews() {
+  // Recall: show a random letter sign
+  const previewLetter = ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+  document.getElementById('previewRecall').src = imgUrl(previewLetter);
+
+  // Identify: show 3 random signs side by side
+  const strip = document.getElementById('previewIdentifyStrip');
+  const three = shuffle([...ALPHABET]).slice(0,3);
+  strip.innerHTML = three.map(l =>
+    `<img src="${imgUrl(l)}" alt="ASL ${l}" style="flex:1;height:100%;object-fit:cover;opacity:.7">`
+  ).join('');
+  strip.innerHTML += `<span class="preview-label">Identify the letter</span>`;
+})();
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+  return a;
+}
+
+function selectMode(btn) {
+  document.querySelectorAll('.mode-btn[data-mode]').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  mode = btn.dataset.mode;
+}
+
+function selectLen(n, btn) {
+  document.querySelectorAll('.len-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  deckSize = n;
+}
+
+function startQuiz() {
+  deck = shuffle(ALPHABET).slice(0, deckSize);
+  idx = 0; results = new Array(deck.length).fill(null); flipped = false; answered = false; streak = 0;
+  showScreen('screenQuiz');
+  buildTracker();
+  renderCard();
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function buildTracker() {
+  document.getElementById('letterTracker').innerHTML = deck.map((l,i) =>
+    `<div class="tracker-dot" id="dot${i}">${l}</div>`).join('');
+}
+
+function updateDot(i, state) {
+  const d = document.getElementById('dot'+i);
+  if (d) d.className = 'tracker-dot ' + (state||'');
+}
+
+function renderCard() {
+  const letter = deck[idx];
+  flipped = false; answered = false; hintShowing = false;
+  document.getElementById('progressLabel').textContent = `Card ${idx+1} of ${deck.length}`;
+  document.getElementById('progressFill').style.width = `${(idx/deck.length)*100}%`;
+  buildTracker();
+  results.forEach((r,i) => { if (r) updateDot(i, r); });
+  updateDot(idx, 'current');
+
+  if (mode === 'recall') {
+    document.getElementById('recallMode').style.display = 'flex';
+    document.getElementById('identifyMode').style.display = 'none';
+    document.getElementById('quizModeLabel').textContent = 'Letter → Sign';
+    document.getElementById('modeTag').innerHTML = '<i class="ti ti-refresh"></i>Flip to reveal';
+    document.getElementById('recallLetter').textContent = letter;
+    document.getElementById('recallImg').src = imgUrl(letter);
+    document.getElementById('recallBackLabel').textContent = `Sign for ${letter}`;
+    document.getElementById('recallBackTip').textContent = TIPS[letter] || '';
+    document.getElementById('flipInner').classList.remove('flipped');
+    // Reset hint
+    const hintLayer = document.getElementById('hintImgLayer');
+    hintLayer.style.backgroundImage = `url('${imgUrl(letter)}')`;
+    hintLayer.classList.remove('showing');
+    document.getElementById('recallSkipBtn').style.display = '';
+    document.getElementById('recallGotBtn').style.display = 'none';
+    document.getElementById('recallMissBtn').style.display = 'none';
+  } else {
+    document.getElementById('recallMode').style.display = 'none';
+    document.getElementById('identifyMode').style.display = 'flex';
+    document.getElementById('quizModeLabel').textContent = 'Sign → Letter';
+    document.getElementById('modeTag').innerHTML = '<i class="ti ti-hand-click"></i>Pick the letter';
+    document.getElementById('identifyImg').src = imgUrl(letter);
+    document.getElementById('identifyTipBar').classList.remove('visible');
+    document.getElementById('identifyTipBar').textContent = '';
+    document.getElementById('nextBtn').disabled = true;
+    buildChoices(letter);
+  }
+  setFeedback('neutral', 'Your turn!', 'Answer to continue');
+}
+
+function toggleHint(e) {
+  e.stopPropagation(); // don't flip card
+  if (flipped) return;
+  hintShowing = !hintShowing;
+  document.getElementById('hintImgLayer').classList.toggle('showing', hintShowing);
+  const btn = document.getElementById('hintBtn');
+  btn.innerHTML = hintShowing
+    ? '<i class="ti ti-eye-off"></i>Hide'
+    : '<i class="ti ti-eye"></i>Hint';
+}
+
+function flipCard(e) {
+  if (mode !== 'recall') return;
+  flipped = !flipped;
+  document.getElementById('flipInner').classList.toggle('flipped', flipped);
+  // Hide hint when flipped
+  if (flipped) {
+    document.getElementById('hintImgLayer').classList.remove('showing');
+    hintShowing = false;
+    document.getElementById('hintBtn').innerHTML = '<i class="ti ti-eye"></i>Hint';
+  }
+  if (flipped) {
+    document.getElementById('recallSkipBtn').style.display = 'none';
+    document.getElementById('recallGotBtn').style.display = '';
+    document.getElementById('recallMissBtn').style.display = '';
+    document.getElementById('modeTag').innerHTML = '<i class="ti ti-check"></i>Did you get it?';
+  } else {
+    document.getElementById('recallSkipBtn').style.display = '';
+    document.getElementById('recallGotBtn').style.display = 'none';
+    document.getElementById('recallMissBtn').style.display = 'none';
+    document.getElementById('modeTag').innerHTML = '<i class="ti ti-refresh"></i>Flip to reveal';
+  }
+}
+
+function markRecall(correct) {
+  results[idx] = correct ? 'correct' : 'wrong';
+  updateDot(idx, correct ? 'correct' : 'wrong');
+  if (correct) { streak++; setFeedback('correct', 'Nice!', streak > 1 ? `${streak} in a row 🔥` : 'Keep it up'); }
+  else          { streak=0; setFeedback('wrong', 'Not quite', `The sign for ${deck[idx]}`); }
+  updateScores();
+  setTimeout(nextCard, 650);
+}
+
+function buildChoices(correct) {
+  const wrong = shuffle(ALPHABET.filter(l => l !== correct)).slice(0,3);
+  const opts = shuffle([correct, ...wrong]);
+  document.getElementById('choicesGrid').innerHTML = opts.map(l =>
+    `<button class="choice-btn" onclick="pickChoice('${l}','${correct}',this)">${l}</button>`).join('');
+}
+
+function pickChoice(picked, correct, btn) {
+  if (answered) return;
+  answered = true;
+  document.querySelectorAll('.choice-btn').forEach(b => {
+    b.disabled = true;
+    if (b.textContent === correct) b.classList.add('correct');
+  });
+  const right = picked === correct;
+  if (!right) btn.classList.add('wrong');
+  results[idx] = right ? 'correct' : 'wrong';
+  updateDot(idx, right ? 'correct' : 'wrong');
+  if (right) { streak++; setFeedback('correct', 'Correct!', streak > 1 ? `${streak} in a row 🔥` : 'Well done'); }
+  else       { streak=0; setFeedback('wrong', `It was ${correct}`, 'Try to remember the shape'); }
+  // Show tip bar
+  const tipBar = document.getElementById('identifyTipBar');
+  tipBar.textContent = TIPS[correct] || '';
+  tipBar.classList.add('visible');
+  updateScores();
+  document.getElementById('nextBtn').disabled = false;
+}
+
+function skipCard() {
+  results[idx] = 'skipped';
+  updateDot(idx, 'skipped');
+  streak = 0;
+  setFeedback('neutral', 'Skipped', 'Come back to it later');
+  updateScores();
+  nextCard();
+}
+
+function nextCard() {
+  idx++;
+  if (idx >= deck.length) { showResults(); return; }
+  renderCard();
+}
+
+function updateScores() {
+  const c = results.filter(r=>r==='correct').length;
+  const m = results.filter(r=>r==='wrong').length;
+  const a = c + m;
+  document.getElementById('sideCorrect').textContent  = c;
+  document.getElementById('sideMissed').textContent   = m;
+  document.getElementById('sideAccuracy').textContent = a>0 ? Math.round(c/a*100)+'%' : '—';
+  document.getElementById('topScore').textContent     = `${c} correct`;
+  document.getElementById('streakVal').textContent    = streak;
+}
+
+function setFeedback(type, text, sub) {
+  const box=document.getElementById('feedbackBox');
+  const icon=document.getElementById('feedbackIcon');
+  const iconI=document.getElementById('feedbackIconI');
+  const txt=document.getElementById('feedbackText');
+  const subEl=document.getElementById('feedbackSub');
+  const map = { correct:['','','ti ti-check','',''], wrong:['wrong-fb','wrong-icon','ti ti-x','wrong-text','wrong-sub'], neutral:['neutral-fb','neutral-icon','ti ti-cards','neutral-text','neutral-sub'] };
+  const [bfb,bic,bii,btx,bsb] = map[type]||map.neutral;
+  box.className='feedback-box '+(bfb||''); icon.className='feedback-icon '+(bic||'');
+  iconI.className=bii; txt.className='feedback-text '+(btx||''); subEl.className='feedback-sub '+(bsb||'');
+  txt.textContent=text; subEl.textContent=sub;
+}
+
+function showResults() {
+  const c = results.filter(r=>r==='correct').length;
+  const m = results.filter(r=>r==='wrong').length;
+  const s = results.filter(r=>r==='skipped').length;
+  const pct = Math.round(c/deck.length*100);
+  document.getElementById('resultsPct').textContent = pct+'%';
+  document.getElementById('rCorrect').textContent = c;
+  document.getElementById('rMissed').textContent  = m;
+  document.getElementById('rSkipped').textContent = s;
+  const title = pct>=90?'Excellent! 🎉':pct>=70?'Nice work! 👍':pct>=50?'Good effort!':'Keep practising!';
+  document.getElementById('resultsTitle').textContent = title;
+  document.getElementById('resultsSub').textContent   = `You scored ${c} of ${deck.length} cards.`;
+  document.getElementById('resultsRing').style.background = `conic-gradient(#4ade80 ${pct}%, #e8e8f0 ${pct}%)`;
+  document.getElementById('progressFill').style.width='100%';
+  document.getElementById('progressLabel').textContent=`Done · ${deck.length} cards`;
+
+  // Missed review with images
+  const missed_l = deck.filter((_,i) => results[i]==='wrong');
+  const missedEl = document.getElementById('missedList');
+  if (missed_l.length) {
+    missedEl.innerHTML = missed_l.map(l => `
+      <div class="missed-card">
+        <img src="${imgUrl(l)}" alt="ASL ${l}">
+        <div class="missed-card-lbl">${l}</div>
+      </div>`).join('');
+  } else {
+    missedEl.innerHTML = `<span class="review-chip got">No misses — perfect!</span>`;
+  }
+
+  showScreen('screenResults');
+}
+
+function goSetup() {
+  streak=0; updateScores();
+  document.getElementById('progressLabel').textContent='Card 0 of 0';
+  document.getElementById('progressFill').style.width='0%';
+  document.getElementById('topScore').textContent='0 correct';
+  document.getElementById('sideCorrect').textContent='0';
+  document.getElementById('sideMissed').textContent='0';
+  document.getElementById('sideAccuracy').textContent='—';
+  document.getElementById('streakVal').textContent='0';
+  document.getElementById('letterTracker').innerHTML='';
+  setFeedback('neutral','Ready to go!','Pick a mode and start');
+  showScreen('screenSetup');
+}
+</script>
+</body>
+</html>

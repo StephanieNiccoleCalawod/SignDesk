@@ -1,0 +1,197 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.app{display:flex;height:580px;background:#f0f0f8;font-family:'Calibri',Arial,sans-serif;border-radius:12px;overflow:hidden;border:1px solid #ddd}
+.sidebar{width:190px;background:#1a1f3b;display:flex;flex-direction:column;flex-shrink:0}
+.logo{padding:18px 16px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,0.08)}
+.logo-icon{width:32px;height:32px;background:#4ade80;border-radius:8px;display:flex;align-items:center;justify-content:center}
+.logo-icon svg{width:18px;height:18px;fill:#1a1f3b}
+.logo-text{color:#fff;font-size:15px;font-weight:600;letter-spacing:0.3px}
+.nav{padding:12px 0;flex:1}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 16px;color:rgba(255,255,255,0.55);font-size:13px;cursor:pointer;border-radius:0;transition:background 0.15s}
+.nav-item i{font-size:16px}
+.nav-item.active{background:rgba(255,255,255,0.1);color:#fff}
+.nav-item.active i{color:#4ade80}
+.nav-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.3);padding:8px 16px 4px}
+.nav-item:hover:not(.active){background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.8)}
+.sidebar-foot{padding:14px 16px;border-top:1px solid rgba(255,255,255,0.08)}
+.logout{color:rgba(255,100,100,0.8);font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{background:#fff;padding:0 20px;height:52px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e8e8f0;flex-shrink:0}
+.page-title{font-size:16px;font-weight:600;color:#1a1f3b}
+.session-badge{display:flex;align-items:center;gap:12px}
+.progress-wrap{display:flex;align-items:center;gap:8px}
+.progress-label{font-size:12px;color:#666}
+.progress-bar{width:120px;height:6px;background:#e8e8f0;border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;width:30%;background:#4ade80;border-radius:3px}
+.score-pill{background:#f0f9f4;border:1px solid #bbf7d0;color:#15803d;font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px}
+.content{flex:1;padding:16px;display:grid;grid-template-columns:220px 1fr 200px;gap:14px;overflow:hidden}
+.card{background:#fff;border-radius:12px;border:1px solid #e8e8f0;padding:14px;display:flex;flex-direction:column}
+.card-label{font-size:10px;text-transform:uppercase;letter-spacing:0.8px;color:#9ca3af;margin-bottom:10px;font-weight:600}
+.target-card{align-items:center}
+.letter-big{font-size:72px;font-weight:700;color:#1a1f3b;line-height:1;margin:6px 0 10px}
+.asl-img-box{width:130px;height:130px;background:#f8f8fc;border:1.5px dashed #d1d5db;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px}
+.asl-img-box svg{width:64px;height:64px;opacity:0.4}
+.asl-placeholder-text{font-size:10px;color:#aaa;text-align:center}
+.target-hint{font-size:12px;color:#6b7280;margin-top:10px;text-align:center;line-height:1.4}
+.target-hint span{font-weight:600;color:#1a1f3b}
+.cam-card{padding:12px}
+.cam-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.fps-badge{font-size:11px;color:#9ca3af;background:#f3f4f6;padding:2px 8px;border-radius:10px}
+.cam-feed{flex:1;background:#111827;border-radius:8px;position:relative;overflow:hidden;min-height:300px;display:flex;align-items:center;justify-content:center}
+.cam-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px}
+.cam-no-hand{font-size:13px;color:rgba(255,255,255,0.4)}
+.landmark-dots{position:absolute;inset:0}
+.dot{position:absolute;width:6px;height:6px;border-radius:50%;background:#4ade80;transform:translate(-50%,-50%)}
+.hand-outline{position:absolute;width:120px;height:170px;left:50%;top:50%;transform:translate(-50%,-55%);opacity:0.15}
+.cam-footer{margin-top:10px;display:flex;gap:8px}
+.btn{padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:none;display:flex;align-items:center;gap:6px}
+.btn-start{background:#4ade80;color:#14532d;flex:1}
+.btn-stop{background:#fee2e2;color:#991b1b;flex:1}
+.btn i{font-size:14px}
+.status-card{}
+.status-section{margin-bottom:14px}
+.status-section:last-child{margin-bottom:0}
+.section-title{font-size:10px;text-transform:uppercase;letter-spacing:0.8px;color:#9ca3af;font-weight:600;margin-bottom:8px}
+.status-pill{padding:5px 10px;border-radius:20px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px}
+.pill-detecting{background:#fef3c7;color:#92400e}
+.pill-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.conf-bar-wrap{margin-bottom:6px}
+.conf-row{display:flex;justify-content:space-between;font-size:11px;color:#6b7280;margin-bottom:4px}
+.conf-pct{font-weight:600;color:#1a1f3b;font-size:13px}
+.conf-track{height:8px;background:#f3f4f6;border-radius:4px;overflow:hidden}
+.conf-fill{height:100%;border-radius:4px;transition:width 0.3s}
+.conf-fill.low{background:#f97316;width:22%}
+.conf-fill.mid{background:#facc15;width:55%}
+.conf-fill.high{background:#4ade80;width:82%}
+.conf-warn{font-size:10px;color:#ea580c;margin-top:3px;display:flex;align-items:center;gap:3px}
+.score-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.score-box{background:#f8f8fc;border-radius:8px;padding:8px;text-align:center}
+.score-val{font-size:18px;font-weight:700;color:#1a1f3b}
+.score-lbl{font-size:10px;color:#9ca3af;margin-top:1px}
+.feedback-box{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px;display:flex;align-items:center;gap:7px}
+.feedback-icon{width:24px;height:24px;border-radius:50%;background:#4ade80;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.feedback-icon i{font-size:13px;color:#14532d}
+.feedback-text{font-size:11px;color:#15803d;font-weight:600;line-height:1.3}
+.feedback-sub{font-size:10px;color:#4ade80;font-weight:400}
+</style>
+<h2 class="sr-only">SignDesk Camera Practice UI mockup showing sidebar navigation, target letter panel, webcam feed area, and real-time confidence and score panels</h2>
+<div class="app">
+  <div class="sidebar">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+      </div>
+      <span class="logo-text">SignDesk</span>
+    </div>
+    <div class="nav">
+      <div class="nav-item"><i class="ti ti-layout-dashboard" aria-hidden="true"></i>Dashboard</div>
+      <div class="nav-label">Learn</div>
+      <div class="nav-item active"><i class="ti ti-camera" aria-hidden="true"></i>Camera Practice</div>
+      <div class="nav-item"><i class="ti ti-cards" aria-hidden="true"></i>Flashcard Quiz</div>
+      <div class="nav-item"><i class="ti ti-book" aria-hidden="true"></i>ASL Reference</div>
+      <div class="nav-label">Account</div>
+      <div class="nav-item"><i class="ti ti-settings" aria-hidden="true"></i>Settings</div>
+    </div>
+    <div class="sidebar-foot">
+      <div class="logout"><i class="ti ti-logout" aria-hidden="true"></i>Log out</div>
+    </div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <span class="page-title">Camera Practice</span>
+      <div class="session-badge">
+        <div class="progress-wrap">
+          <span class="progress-label">Letter 3 of 10</span>
+          <div class="progress-bar"><div class="progress-fill"></div></div>
+        </div>
+        <div class="score-pill">2 correct</div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="card target-card">
+        <div class="card-label">Target letter</div>
+        <div class="letter-big">B</div>
+        <div class="asl-img-box">
+          <svg viewBox="0 0 80 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="28" y="10" width="14" height="36" rx="7" fill="#555"/>
+            <rect x="44" y="10" width="14" height="36" rx="7" fill="#555"/>
+            <rect x="13" y="10" width="14" height="36" rx="7" fill="#555"/>
+            <rect x="11" y="42" width="58" height="36" rx="12" fill="#777"/>
+            <rect x="20" y="70" width="10" height="20" rx="5" fill="#555" transform="rotate(-30 20 70)"/>
+          </svg>
+          <span class="asl-placeholder-text">ASL reference<br>image</span>
+        </div>
+        <p class="target-hint">Form the letter <span>B</span> in front of the camera and hold it steady</p>
+      </div>
+      <div class="card cam-card">
+        <div class="cam-header">
+          <div class="card-label" style="margin:0">Live detection</div>
+          <span class="fps-badge">FPS: 28</span>
+        </div>
+        <div class="cam-feed">
+          <div class="landmark-dots">
+            <div class="dot" style="left:52%;top:72%"></div>
+            <div class="dot" style="left:50%;top:60%"></div>
+            <div class="dot" style="left:48%;top:50%"></div>
+            <div class="dot" style="left:47%;top:41%"></div>
+            <div class="dot" style="left:46%;top:33%"></div>
+            <div class="dot" style="left:55%;top:49%"></div>
+            <div class="dot" style="left:56%;top:38%"></div>
+            <div class="dot" style="left:57%;top:30%"></div>
+            <div class="dot" style="left:58%;top:24%"></div>
+            <div class="dot" style="left:61%;top:49%"></div>
+            <div class="dot" style="left:63%;top:38%"></div>
+            <div class="dot" style="left:64%;top:30%"></div>
+            <div class="dot" style="left:65%;top:24%"></div>
+            <div class="dot" style="left:67%;top:50%"></div>
+            <div class="dot" style="left:69%;top:39%"></div>
+            <div class="dot" style="left:70%;top:31%"></div>
+            <div class="dot" style="left:71%;top:25%"></div>
+            <div class="dot" style="left:73%;top:53%"></div>
+            <div class="dot" style="left:76%;top:44%"></div>
+            <div class="dot" style="left:77%;top:37%"></div>
+            <div class="dot" style="left:78%;top:30%"></div>
+          </div>
+          <div style="position:absolute;top:10px;left:10px;background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.5);border-radius:6px;padding:3px 8px;font-size:11px;color:#4ade80">Hand detected</div>
+        </div>
+        <div class="cam-footer">
+          <button class="btn btn-start"><i class="ti ti-player-play" aria-hidden="true"></i>Start</button>
+          <button class="btn btn-stop"><i class="ti ti-player-stop" aria-hidden="true"></i>Stop</button>
+        </div>
+      </div>
+      <div class="card status-card">
+        <div class="status-section">
+          <div class="section-title">System status</div>
+          <span class="status-pill pill-detecting"><span class="pill-dot"></span>Detecting…</span>
+        </div>
+        <div class="status-section">
+          <div class="section-title">Match confidence</div>
+          <div class="conf-bar-wrap">
+            <div class="conf-row"><span>Current</span><span class="conf-pct">82%</span></div>
+            <div class="conf-track"><div class="conf-fill high"></div></div>
+          </div>
+          <div class="conf-bar-wrap" style="margin-top:8px">
+            <div class="conf-row"><span>Hold to confirm</span><span style="font-size:11px;color:#6b7280">≥ 60%</span></div>
+            <div class="conf-track"><div class="conf-fill mid"></div></div>
+          </div>
+        </div>
+        <div class="status-section">
+          <div class="section-title">Session score</div>
+          <div class="score-grid">
+            <div class="score-box"><div class="score-val">2</div><div class="score-lbl">Correct</div></div>
+            <div class="score-box"><div class="score-val">1</div><div class="score-lbl">Missed</div></div>
+            <div class="score-box" style="grid-column:1/-1"><div class="score-val">67%</div><div class="score-lbl">Accuracy</div></div>
+          </div>
+        </div>
+        <div class="status-section">
+          <div class="section-title">Feedback</div>
+          <div class="feedback-box">
+            <div class="feedback-icon"><i class="ti ti-check" aria-hidden="true"></i></div>
+            <div><div class="feedback-text">Nice form!</div><div class="feedback-sub">Hold steady to confirm</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

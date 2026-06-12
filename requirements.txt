@@ -1,0 +1,7 @@
+PyQt6
+opencv-python
+mediapipe
+numpy
+cryptography
+tensorflow
+scikit-learn

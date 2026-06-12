@@ -215,6 +215,7 @@ def create_step_card(parent: QWidget, step_number: int, title: str,
     badge_layout.addWidget(badge_lbl)
 
     title_lbl = QLabel(title)
+    title_lbl.setObjectName("stepTitle")
     title_lbl.setWordWrap(True)
     title_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft)
     title_lbl.setStyleSheet(f"color: {title_color};")
@@ -227,6 +228,7 @@ def create_step_card(parent: QWidget, step_number: int, title: str,
     divider.setStyleSheet(f"QFrame#stepDivider {{ background: {card_border}; border: none; border-radius: 0px; }}")
 
     desc_lbl = QLabel(description)
+    desc_lbl.setObjectName("stepDesc")
     desc_lbl.setWordWrap(True)
     desc_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft)
     desc_lbl.setStyleSheet(f"color: {desc_color};")

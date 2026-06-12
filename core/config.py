@@ -17,7 +17,7 @@ DEFAULT_SETTINGS = {
     "appearance.show_landmark_overlay": True,
 
     # Gesture Recognition
-    "gesture.confidence_threshold": 70,
+    "gesture.confidence_threshold": 60,
     "gesture.timeout": 2.0,
     "gesture.show_confidence_indicator": True,
 
@@ -33,6 +33,7 @@ DEFAULT_SETTINGS = {
 
     # Accessibility
     "accessibility.screen_reader_support": True,
+    "accessibility.audio_prompts": True,
 
     # Webcam
     "webcam.auto_start_on_launch": True,

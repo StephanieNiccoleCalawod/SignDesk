@@ -50,6 +50,7 @@ _SECTION_DEFAULTS: dict = {
         "appearance.theme":                    "system",
         "appearance.show_landmark_overlay":    False,
         "accessibility.screen_reader_support": False,
+        "accessibility.audio_prompts":         False,
     },
     "privacy": {
         "privacy.gesture_history_log":         False,
@@ -1314,6 +1315,7 @@ class SettingsPage(QWidget):
         self._section_title(parent_layout, "Accessibility")
         card = self._card(parent_layout)
         self._toggle_row(card, "Screen reader support", "Optimize UI labels for assistive tools", "accessibility.screen_reader_support")
+        self._toggle_row(card, "Audio prompts for target letters", "Announce each new target letter aloud during Camera Practice", "accessibility.audio_prompts")
 
     # ══════════════════════════════════════════════════════
     # SECTION: WEBCAM

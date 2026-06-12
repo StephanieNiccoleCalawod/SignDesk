@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap, QCursor, QPainter, QLinearGradient, QColor
 
-from core.theme import c
+from core.theme import c, ThemeSignal
 from core.ui_helpers import _set_font
 from modules.gesture_history.backend import (
     get_history,
@@ -83,123 +83,47 @@ class GestureLogViewerPage(QWidget):
         self._build()
         self._load_records()
 
+        try:
+            ThemeSignal.instance().theme_changed.connect(self._on_theme_changed)
+        except Exception:
+            pass
+
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self._build_sidebar(layout)
-        self._build_body(layout)
-
-    def _build_sidebar(self, parent_layout):
-        from core.theme import is_dark
-        dark = is_dark()
-
-        title_col   = "#FFFFFF" if dark else "#2C3358"
-        divider_col = "#4A4590" if dark else c("border")
-        hover_col   = "#3D4470" if dark else "#D6D3E8"
-
-        sidebar = _GradientSidebar(self)
-        parent_layout.addWidget(sidebar)
-
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(16, 24, 16, 20)
-        layout.setSpacing(0)
-
-        # Logo + brand
-        brand = QHBoxLayout()
-        brand.setSpacing(10)
-        brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        logo_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "assets", "logo.png"
-        )
-        if os.path.exists(logo_path):
-            logo_lbl = QLabel()
-            pixmap = QPixmap(logo_path).scaled(
-                36, 36, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            logo_lbl.setPixmap(pixmap)
-            logo_lbl.setStyleSheet("background: transparent;")
-            brand.addWidget(logo_lbl)
-
-        title = QLabel("SignDesk")
-        title.setStyleSheet(f"color: {title_col}; background: transparent;")
-        _set_font(title, 16, bold=True)
-        brand.addWidget(title)
-        layout.addLayout(brand)
-
-        # Divider
-        layout.addSpacing(16)
-        div1 = QFrame()
-        div1.setFixedHeight(1)
-        div1.setStyleSheet(f"background-color: {divider_col}; border: none;")
-        layout.addWidget(div1)
-        layout.addSpacing(16)
-
-        # Back to Settings — accent pill button
-        btn_back = QPushButton("←  Back to Settings")
-        btn_back.setFixedHeight(36)
-        btn_back.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        btn_back.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #495086;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 18px;
-                font-family: 'Segoe UI';
-                font-size: 12px;
-                font-weight: bold;
-                padding: 0px 16px;
-                text-align: center;
-            }}
-            QPushButton:hover {{
-                background-color: #3F4678;
-            }}
-        """)
-        btn_back.clicked.connect(self._on_back)
-        layout.addWidget(btn_back)
-
-        layout.addStretch()
-
-        # Bottom: divider + logout
-        div2 = QFrame()
-        div2.setFixedHeight(1)
-        div2.setStyleSheet(f"background-color: {divider_col}; border: none;")
-        layout.addWidget(div2)
-        layout.addSpacing(8)
-
-        logout_btn = QPushButton("→  Logout")
-        logout_btn.setFixedHeight(38)
-        logout_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        logout_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: #FF8A80; text-align: left;
-                padding-left: 12px; border-radius: 10px;
-                font-family: 'Segoe UI'; font-size: 13px; font-weight: bold;
-            }}
-            QPushButton:hover {{ background-color: {hover_col}; }}
-        """)
-        logout_btn.clicked.connect(self._on_logout)
-        layout.addWidget(logout_btn)
-
-    def _build_body(self, parent_layout):
-        body = QWidget()
-        body.setStyleSheet("background: transparent;")
-        layout = QVBoxLayout(body)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 20, 28, 20)
         layout.setSpacing(10)
 
         # ── Title row ─────────────────────────────────────
         title_row = QHBoxLayout()
-        title_lbl = QLabel("Saved Gesture Log")
-        title_lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
-        _set_font(title_lbl, size=20, bold=True)
-        title_row.addWidget(title_lbl)
+
+        self._btn_back = QPushButton("←  Back to Settings")
+        self._btn_back.setFixedHeight(32)
+        self._btn_back.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._btn_back.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #495086;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                font-family: 'Segoe UI';
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: #3F4678;
+            }}
+        """)
+        self._btn_back.clicked.connect(self._on_back)
+        title_row.addWidget(self._btn_back)
+        title_row.addSpacing(14)
+
+        self._title_lbl = QLabel("Saved Gesture Log")
+        self._title_lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        _set_font(self._title_lbl, size=20, bold=True)
+        title_row.addWidget(self._title_lbl)
         
         title_row.addSpacing(10)
         
@@ -210,37 +134,37 @@ class GestureLogViewerPage(QWidget):
         title_row.addStretch()
         layout.addLayout(title_row)
 
-        desc_lbl = QLabel("All gesture logs stored locally on this device.")
-        desc_lbl.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
-        _set_font(desc_lbl, size=11)
-        layout.addWidget(desc_lbl)
+        self._desc_lbl = QLabel("All gesture logs stored locally on this device.")
+        self._desc_lbl.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
+        _set_font(self._desc_lbl, size=11)
+        layout.addWidget(self._desc_lbl)
         layout.addSpacing(4)
 
         # ── Toolbar ───────────────────────────────────────
-        toolbar = QFrame()
-        toolbar.setStyleSheet(f"""
+        self._toolbar = QFrame()
+        self._toolbar.setStyleSheet(f"""
             QFrame {{
                 background-color: {c('bg_primary')};
                 border: 1px solid {c('border')};
                 border-radius: 10px;
             }}
         """)
-        tb_layout = QHBoxLayout(toolbar)
+        tb_layout = QHBoxLayout(self._toolbar)
         tb_layout.setContentsMargins(14, 12, 14, 12)
 
-        search_wrap = QFrame()
-        search_wrap.setStyleSheet(f"""
+        self._search_wrap = QFrame()
+        self._search_wrap.setStyleSheet(f"""
             QFrame {{
                 background-color: {c('input_bg')};
                 border: 1px solid {c('border')};
                 border-radius: 8px;
             }}
         """)
-        s_layout = QHBoxLayout(search_wrap)
+        s_layout = QHBoxLayout(self._search_wrap)
         s_layout.setContentsMargins(10, 0, 10, 0)
         
-        s_icon = QLabel("⌕")
-        s_icon.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        self._search_icon = QLabel("⌕")
+        self._search_icon.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
         
         self._filter_var = QLineEdit()
         self._filter_var.setPlaceholderText("Filter by gesture or text…")
@@ -257,9 +181,9 @@ class GestureLogViewerPage(QWidget):
         """)
         self._filter_var.textChanged.connect(self._apply_filter)
         
-        s_layout.addWidget(s_icon)
+        s_layout.addWidget(self._search_icon)
         s_layout.addWidget(self._filter_var)
-        tb_layout.addWidget(search_wrap)
+        tb_layout.addWidget(self._search_wrap)
         
         tb_layout.addStretch()
 
@@ -285,9 +209,9 @@ class GestureLogViewerPage(QWidget):
         
         tb_layout.addSpacing(8)
 
-        btn_clear = QPushButton("🗑 Clear all")
-        btn_clear.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        btn_clear.setStyleSheet(f"""
+        self._btn_clear = QPushButton("🗑 Clear all")
+        self._btn_clear.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._btn_clear.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 color: {c('error')};
@@ -302,21 +226,21 @@ class GestureLogViewerPage(QWidget):
                 color: #FFFFFF;
             }}
         """)
-        btn_clear.clicked.connect(self._handle_clear)
-        tb_layout.addWidget(btn_clear)
+        self._btn_clear.clicked.connect(self._handle_clear)
+        tb_layout.addWidget(self._btn_clear)
 
-        layout.addWidget(toolbar)
+        layout.addWidget(self._toolbar)
 
         # ── Table header ──────────────────────────────────
-        header = QFrame()
-        header.setStyleSheet(f"""
+        self._header_frame = QFrame()
+        self._header_frame.setStyleSheet(f"""
             QFrame {{
                 background-color: {c('bg_primary')};
                 border: 1px solid {c('border')};
                 border-radius: 10px;
             }}
         """)
-        h_layout = QHBoxLayout(header)
+        h_layout = QHBoxLayout(self._header_frame)
         h_layout.setContentsMargins(14, 8, 14, 8)
         h_layout.setSpacing(8)
 
@@ -338,7 +262,7 @@ class GestureLogViewerPage(QWidget):
             h_layout.addWidget(lbl)
         h_layout.addStretch()
 
-        layout.addWidget(header)
+        layout.addWidget(self._header_frame)
 
         # ── Scrollable rows ───────────────────────────────
         self._scroll_area = QScrollArea()
@@ -371,8 +295,6 @@ class GestureLogViewerPage(QWidget):
         self._feedback_timer = QTimer(self)
         self._feedback_timer.setSingleShot(True)
         self._feedback_timer.timeout.connect(lambda: self._feedback_lbl.setText(""))
-
-        parent_layout.addWidget(body, stretch=1)
 
     # ── Logic ─────────────────────────────────────────────────────────────────
 
@@ -570,3 +492,109 @@ class GestureLogViewerPage(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._app.show_login()
+
+    def _on_theme_changed(self, is_dark: bool):
+        self._update_styles()
+      
+    def _update_styles(self):
+        self.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        if hasattr(self, '_btn_back') and self._btn_back:
+            self._btn_back.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: #495086;
+                    color: #FFFFFF;
+                    border: none;
+                    border-radius: 6px;
+                    font-family: 'Segoe UI';
+                    font-size: 11px;
+                    font-weight: bold;
+                    padding: 0px 12px;
+                }}
+                QPushButton:hover {{
+                    background-color: #3F4678;
+                }}
+            """)
+        if hasattr(self, '_title_lbl') and self._title_lbl:
+            self._title_lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        if hasattr(self, '_count_badge') and self._count_badge:
+            self._count_badge.setStyleSheet(f"background-color: {C_PURPLE_BG}; color: {C_PURPLE_FG}; border-radius: 10px; padding: 3px 10px; font-weight: bold; font-family: 'Segoe UI'; font-size: 11px;")
+        if hasattr(self, '_desc_lbl') and self._desc_lbl:
+            self._desc_lbl.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
+        if hasattr(self, '_toolbar') and self._toolbar:
+            self._toolbar.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {c('bg_primary')};
+                    border: 1px solid {c('border')};
+                    border-radius: 10px;
+                }}
+            """)
+        if hasattr(self, '_search_wrap') and self._search_wrap:
+            self._search_wrap.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {c('input_bg')};
+                    border: 1px solid {c('border')};
+                    border-radius: 8px;
+                }}
+            """)
+        if hasattr(self, '_search_icon') and self._search_icon:
+            self._search_icon.setStyleSheet(f"color: {c('text_muted')}; border: none; background: transparent;")
+        if hasattr(self, '_filter_var') and self._filter_var:
+            self._filter_var.setStyleSheet(f"""
+                QLineEdit {{
+                    border: none;
+                    background: transparent;
+                    color: {c('text_primary')};
+                    font-family: 'Segoe UI';
+                    font-size: 12px;
+                }}
+            """)
+        if hasattr(self, '_download_btn') and self._download_btn:
+            self._download_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {c('accent')};
+                    color: #FFFFFF;
+                    border: none;
+                    border-radius: 8px;
+                    font-family: 'Segoe UI';
+                    font-size: 12px;
+                    font-weight: bold;
+                    padding: 6px 12px;
+                }}
+                QPushButton:hover {{
+                    background-color: {c('accent_hover')};
+                }}
+            """)
+        if hasattr(self, '_btn_clear') and self._btn_clear:
+            self._btn_clear.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {c('error')};
+                    border: 1px solid {c('error')};
+                    border-radius: 8px;
+                    font-family: 'Segoe UI';
+                    font-size: 12px;
+                    padding: 6px 12px;
+                }}
+                QPushButton:hover {{
+                    background-color: #4A2222;
+                    color: #FFFFFF;
+                }}
+            """)
+        if hasattr(self, '_header_frame') and self._header_frame:
+            self._header_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {c('bg_primary')};
+                    border: 1px solid {c('border')};
+                    border-radius: 10px;
+                }}
+            """)
+        if hasattr(self, '_scroll_area') and self._scroll_area:
+            self._scroll_area.setStyleSheet(f"""
+                QScrollArea {{
+                    background-color: {c('bg_primary')};
+                    border: 1px solid {c('border')};
+                    border-radius: 10px;
+                }}
+            """)
+            
+        self._load_records()

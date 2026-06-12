@@ -104,6 +104,11 @@ _CURRENT_DARK: bool = False
 def set_dark_mode(dark: bool) -> None:
     global _CURRENT_DARK
     _CURRENT_DARK = dark
+    try:
+        from theme.themes import set_theme
+        set_theme(dark)
+    except Exception:
+        pass
 
 def is_dark() -> bool:
     return _CURRENT_DARK

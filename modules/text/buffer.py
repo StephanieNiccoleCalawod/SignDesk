@@ -26,7 +26,7 @@ class TextBuffer:
     """
 
     DEBOUNCE_SECONDS = 0.6      # minimum seconds between accepting new gestures
-    SPACE_DELAY_SECONDS = 0.9   # seconds of inactivity before auto-inserting space
+    SPACE_DELAY_SECONDS = 3.0   # seconds of inactivity before auto-inserting space
 
     def __init__(self):
         self._text = ""

@@ -55,9 +55,6 @@ class StabilityBuffer:
     """
     Requires a gesture to be recognized for N consecutive frames
     before confirming it. Prevents flickering between similar gestures.
-
-    Once a gesture is stable, it remains the "last known" gesture
-    until a new stable gesture replaces it.
     """
 
     def __init__(self, required_frames: int = 3):
@@ -81,8 +78,7 @@ class StabilityBuffer:
 
         Returns:
             (gesture, score) if the gesture is stable (confirmed).
-            Last confirmed gesture if still stabilizing.
-            (None, 0.0) if no gesture is confirmed yet.
+            (None, 0.0) while still stabilizing or no gesture detected.
         """
         if gesture is None:
             self._reset()
@@ -99,9 +95,9 @@ class StabilityBuffer:
             self._last_confirmed_score = score
             return gesture, score
 
-        # Still stabilizing — return last confirmed if available
-        if self._last_confirmed is not None:
-            return self._last_confirmed, self._last_confirmed_score
+        # Still stabilizing — return None instead of last confirmed
+        # Returning last confirmed causes repeated add_letter calls
+        # which resets the word assembler flush timer indefinitely
         return None, 0.0
 
     def _reset(self):

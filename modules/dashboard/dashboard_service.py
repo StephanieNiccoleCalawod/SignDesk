@@ -36,6 +36,8 @@ class DashboardSummary:
     privacy_mode: str
     history_logging_enabled: bool
     recent_activity: list[RecentActivity]
+    # True when history logging is off so the UI can show the right hint
+    history_logging_off: bool = False
 
 
 # Cache for camera status to avoid opening VideoCapture repeatedly
@@ -115,61 +117,54 @@ def get_dashboard_summary(username: str) -> Optional[DashboardSummary]:
     print(f"[DEBUG] get_history({user_id}) returned {len(history)} rows.")
     if history:
         print(f"[DEBUG] First row: {history[0]}")
-    
+
+    # Check whether history logging is currently enabled
+    from modules.gesture_history.backend import get_setting as _get_hist_setting
+    history_logging_off = (_get_hist_setting("logging_enabled") != "1")
+
+    # ── Sessions Today: count from audit log login events ──────────────────
+    # This works regardless of whether gesture history logging is on, because
+    # login events are always recorded in the audit log.
     sessions_today = 0
-    unique_signs = set()
+    today_date = datetime.now().date()
+    for e in events:
+        if e.get("event") == "LOGIN_SUCCESS":
+            try:
+                ev_dt = datetime.fromisoformat(e["timestamp"])
+                if ev_dt.date() == today_date:
+                    sessions_today += 1
+            except (ValueError, KeyError):
+                pass
+
+    # ── Signs / Confidence: from gesture history (requires logging enabled) ─
+    unique_signs: set[str] = set()
     total_confidence = 0.0
     count_confidence = 0
-    recent_activity = []
-    
-    today_date = datetime.now().date()
-    print(f"[DEBUG] today_date={today_date}")
-    
-    last_dt = None
-    
+    recent_activity: list[RecentActivity] = []
+
     for row in history:
-        # Parse timestamp
         try:
             dt = datetime.fromisoformat(row["logged_at"])
-        except ValueError as e:
-            print(f"[DEBUG] Failed to parse timestamp {row.get('logged_at')}: {e}")
+        except (ValueError, KeyError):
             continue
-            
-        # Count unique signs (history deciphers it transparently)
+
         gesture = row.get("gesture")
         if gesture:
             unique_signs.add(gesture)
-            
-        # Confidence
+
         conf = row.get("confidence")
         if conf is not None:
             total_confidence += float(conf)
             count_confidence += 1
-            
-        # Session logic for today
-        if dt.date() == today_date:
-            if last_dt is None:
-                sessions_today += 1
-                last_dt = dt
-                print(f"[DEBUG] First session of today started at {dt}")
-            else:
-                # Compare gap (history is ordered DESC, so dt is older than last_dt)
-                gap = (last_dt - dt).total_seconds()
-                if gap > 15 * 60: # 15 minutes
-                    sessions_today += 1
-                    print(f"[DEBUG] New session counted! Gap: {gap}s. dt={dt}, last_dt={last_dt}")
-                last_dt = dt
-                
-        # Recent activity (first 5)
+
         if len(recent_activity) < 5:
             trans = row.get("translated_text") or ""
-            act = RecentActivity(
+            recent_activity.append(RecentActivity(
                 gesture_name=gesture or "Unknown",
                 translated_text=trans,
                 confidence=float(conf) if conf is not None else 0.0,
-                timestamp=dt
-            )
-            recent_activity.append(act)
+                timestamp=dt,
+            ))
 
     print(f"[DEBUG] Final sessions_today={sessions_today}, recent_activity len={len(recent_activity)}")
 
@@ -192,7 +187,8 @@ def get_dashboard_summary(username: str) -> Optional[DashboardSummary]:
         camera_status=cam_status,
         privacy_mode=privacy_mode,
         history_logging_enabled=history_log_enabled,
-        recent_activity=recent_activity
+        recent_activity=recent_activity,
+        history_logging_off=history_logging_off,
     )
 
 def search_dashboard(query: str, username: str) -> list[dict]:

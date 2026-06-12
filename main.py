@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt
 from core.theme import build_qss, c
 from modules.auth.ui import LoginPage, RegisterPage, VerificationPage
 from modules.dashboard.ui import DashboardPage
-from modules.vision.ui import GestureDetectionPage
+from modules.vision.ui import CameraPracticePage
 
 class SignDeskApp(QMainWindow):
     def __init__(self):
@@ -91,22 +91,59 @@ class SignDeskApp(QMainWindow):
         self._current_page = ResetPasswordPage(self._central_widget, self, email)
         self._layout.addWidget(self._current_page)
 
+    def _setup_shell(self, username: str):
+        """Initialize the main application shell with a persistent sidebar."""
+        self._clear()
+        self._set_size(950, 680, resizable=True)
+
+        from components.layout.shell import MainWindowShell
+        from modules.dashboard.ui import DashboardPage
+        from modules.vision.ui import CameraPracticePage
+        from modules.quiz.ui import FlashcardQuizPage
+        from modules.reference.ui import ReferencePage
+        from modules.gesture_history.page import GestureHistoryPage
+        from modules.settings.ui import SettingsPage
+        from modules.gesture_history.log_viewer import GestureLogViewerPage
+
+        # Create shell
+        self._current_page = MainWindowShell(self._central_widget, self)
+        self._current_page.logout_requested.connect(self.show_login)
+
+        # Instantiate pages inside the shell stacked widget
+        dashboard_page = DashboardPage(self._current_page.stacked_widget, self, username)
+        camera_page = CameraPracticePage(self._current_page.stacked_widget, self, username)
+        quiz_page = FlashcardQuizPage(self._current_page.stacked_widget, self, username)
+        ref_page = ReferencePage(self._current_page.stacked_widget, self, username)
+        history_page = GestureHistoryPage(self._current_page.stacked_widget, self, username)
+        settings_page = SettingsPage(self._current_page.stacked_widget, self, username)
+        log_viewer_page = GestureLogViewerPage(self._current_page.stacked_widget, self, username)
+
+        # Register pages with shell
+        self._current_page.add_page("dashboard", dashboard_page)
+        self._current_page.add_page("camera", camera_page)
+        self._current_page.add_page("flashcards", quiz_page)
+        self._current_page.add_page("reference", ref_page)
+        self._current_page.add_page("history", history_page)
+        self._current_page.add_page("settings", settings_page)
+        self._current_page.add_page("log_viewer", log_viewer_page)
+
+        self._layout.addWidget(self._current_page)
+
     def show_settings(self, username: str):
         self._current_user = username
         self._resolve_user_id(username)
-        self._clear()
-        self._set_size(950, 680, resizable=True)
-        from modules.settings.ui import SettingsPage
-        self._current_page = SettingsPage(self._central_widget, self, username)
-        self._layout.addWidget(self._current_page)
+        from components.layout.shell import MainWindowShell
+        if not isinstance(self._current_page, MainWindowShell):
+            self._setup_shell(username)
+        self._current_page.navigate("settings")
 
     def show_dashboard(self, username: str):
         self._current_user = username
         self._resolve_user_id(username)
-        self._clear()
-        self._set_size(950, 680, resizable=True)
-        self._current_page = DashboardPage(self._central_widget, self, username)
-        self._layout.addWidget(self._current_page)
+        from components.layout.shell import MainWindowShell
+        if not isinstance(self._current_page, MainWindowShell):
+            self._setup_shell(username)
+        self._current_page.navigate("dashboard")
 
     @property
     def current_user_id(self) -> int | None:
@@ -122,32 +159,82 @@ class SignDeskApp(QMainWindow):
         except Exception:
             self._current_user_id = None
 
-    def show_gesture_detection(self, username: str):
+    def show_gesture_detection(self, username: str, target_letter: str = None):
         """Navigate to the Gesture Detection page (Module 2)."""
+        # Task 1: Enforce webcam.auto_start_on_launch configuration.
+        # Camera Practice must not launch when webcam access is disabled.
+        from core.config import config
+        if not config.get("webcam.auto_start_on_launch", True):
+            from PyQt6.QtWidgets import QMessageBox
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Camera Access Disabled")
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setText(
+                "Camera Practice is unavailable because webcam access is disabled."
+            )
+            msg.setInformativeText(
+                "To use Camera Practice, go to Settings → Webcam and enable "
+                "\"Auto-start on launch\", then try again."
+            )
+            msg.setStandardButtons(
+                QMessageBox.StandardButton.Ok
+            )
+            msg.exec()
+            # Return without navigating — user stays on the current screen.
+            return
+
         self._current_user = username
         self._resolve_user_id(username)
-        self._clear()
-        self._set_size(950, 680, resizable=True)
-        self._current_page = GestureDetectionPage(self._central_widget, self, username)
-        self._layout.addWidget(self._current_page)
+        from components.layout.shell import MainWindowShell
+        if not isinstance(self._current_page, MainWindowShell):
+            self._setup_shell(username)
+
+        camera_page = self._current_page.pages.get("camera")
+        if camera_page and target_letter:
+            target_letter_upper = target_letter.upper().strip()
+            found_set = False
+            for set_name, letters in camera_page.gesture_sets.items():
+                if set_name != "All Letters" and target_letter_upper in letters:
+                    camera_page.set_selector.setCurrentText(set_name)
+                    found_set = True
+                    break
+            camera_page.viewmodel.set_target_letters([target_letter_upper])
+        elif camera_page:
+            camera_page._on_set_changed()
+
+        self._current_page.navigate("camera")
 
     def show_gesture_history(self, username: str):
         self._current_user = username
         self._resolve_user_id(username)
-        self._clear()
-        self._set_size(950, 680, resizable=True)
-        from modules.gesture_history.page import GestureHistoryPage
-        self._current_page = GestureHistoryPage(self._central_widget, self, username)
-        self._layout.addWidget(self._current_page)
+        from components.layout.shell import MainWindowShell
+        if not isinstance(self._current_page, MainWindowShell):
+            self._setup_shell(username)
+        self._current_page.navigate("history")
+
+    def show_flashcard_quiz(self, username: str):
+        self._current_user = username
+        self._resolve_user_id(username)
+        from components.layout.shell import MainWindowShell
+        if not isinstance(self._current_page, MainWindowShell):
+            self._setup_shell(username)
+        self._current_page.navigate("flashcards")
+
+    def show_reference_chart(self, username: str):
+        self._current_user = username
+        self._resolve_user_id(username)
+        from components.layout.shell import MainWindowShell
+        if not isinstance(self._current_page, MainWindowShell):
+            self._setup_shell(username)
+        self._current_page.navigate("reference")
 
     def show_gesture_log_viewer(self, username: str):
         self._current_user = username
         self._resolve_user_id(username)
-        self._clear()
-        self._set_size(950, 680, resizable=True)
-        from modules.gesture_history.log_viewer import GestureLogViewerPage
-        self._current_page = GestureLogViewerPage(self._central_widget, self, username)
-        self._layout.addWidget(self._current_page)
+        from components.layout.shell import MainWindowShell
+        if not isinstance(self._current_page, MainWindowShell):
+            self._setup_shell(username)
+        self._current_page.navigate("log_viewer")
 
 def _resolve_dark_mode(theme_value: str) -> bool:
     """Determine whether dark mode should be active based on the saved theme preference."""

@@ -6,7 +6,7 @@ PyQt6 migration — CustomTkinter dependency fully removed.
 import os
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
-    QScrollArea, QLineEdit, QMessageBox, QGridLayout, QSizePolicy
+    QScrollArea, QLineEdit, QMessageBox, QGridLayout, QSizePolicy, QPushButton
 )
 from PyQt6.QtCore import Qt, QSize, QTimer, QRect, QPoint
 from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QCursor
@@ -178,9 +178,6 @@ class DashboardPage(QWidget):
         # We will keep references to labels to update them dynamically
         self._lbl_greeting_top = None
         self._lbl_greeting_card = None
-        self._lbl_sessions = None
-        self._lbl_confidence = None
-        self._lbl_signs = None
         
         self._lbl_camera = None
         self._lbl_privacy = None
@@ -192,6 +189,12 @@ class DashboardPage(QWidget):
         self._search_timer.timeout.connect(self._execute_search)
         
         self._build()
+
+        try:
+            from core.theme import ThemeSignal
+            ThemeSignal.instance().theme_changed.connect(self._on_theme_changed)
+        except Exception:
+            pass
 
     def showEvent(self, event):
         self.refresh_dashboard()
@@ -213,15 +216,6 @@ class DashboardPage(QWidget):
             self._lbl_greeting_top.setText(f"{summary.greeting}, {summary.display_name}")
         if self._lbl_greeting_card:
             self._lbl_greeting_card.setText(f"{summary.greeting}, {summary.display_name}")
-            
-
-
-        if self._lbl_sessions:
-            self._lbl_sessions.setText(str(summary.sessions_today))
-        if self._lbl_confidence:
-            self._lbl_confidence.setText(f"{summary.avg_confidence:.1f}%")
-        if self._lbl_signs:
-            self._lbl_signs.setText(str(summary.unique_signs_recognized))
 
         if self._lbl_camera:
             self._lbl_camera.setText(summary.camera_status)
@@ -256,6 +250,12 @@ class DashboardPage(QWidget):
     def _launch_gesture_history(self):
         self._app.show_gesture_history(self._username)
 
+    def _launch_reference_chart(self):
+        self._app.show_reference_chart(self._username)
+
+    def _launch_flashcard_quiz(self):
+        self._app.show_flashcard_quiz(self._username)
+
     def _show_dictionary_coming_soon(self):
         QMessageBox.information(self, "Coming Soon", "The Sign Dictionary feature is coming soon!")
 
@@ -274,6 +274,8 @@ class DashboardPage(QWidget):
             self._launch_gesture_detection()
         elif action == "settings":
             self._launch_settings()
+        elif action == "flashcards":
+            self._launch_flashcard_quiz()
         elif action == "privacy":
             self._launch_settings() # settings handles privacy tab internally if needed
         elif action == "dictionary":
@@ -334,7 +336,6 @@ class DashboardPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._build_sidebar(layout)
         self._build_main_area(layout)
 
     # ══════════════════════════════════════════════════════════
@@ -388,7 +389,8 @@ class DashboardPage(QWidget):
 
         nav_layout.addWidget(create_nav_item(sidebar, "■", "Dashboard", is_active=True))
         nav_layout.addWidget(create_nav_item(sidebar, "◈", "Gesture Translator", command=self._launch_gesture_detection))
-        nav_layout.addWidget(create_nav_item(sidebar, "▣", "Sign Dictionary", command=self._show_dictionary_coming_soon))
+        nav_layout.addWidget(create_nav_item(sidebar, "◆", "Flashcard Quiz", command=self._launch_flashcard_quiz))
+        nav_layout.addWidget(create_nav_item(sidebar, "▣", "Sign Dictionary", command=self._launch_reference_chart))
         nav_layout.addWidget(create_nav_item(sidebar, "▲", "Gesture History", command=self._launch_gesture_history))
 
         layout.addLayout(nav_layout)
@@ -438,11 +440,11 @@ class DashboardPage(QWidget):
     # ══════════════════════════════════════════════════════════
 
     def _build_main_area(self, parent_layout):
-        main = QWidget()
-        main.setStyleSheet(f"background-color: {c('bg_secondary')};")
-        parent_layout.addWidget(main, stretch=1)
+        self._main_content_widget = QWidget()
+        self._main_content_widget.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        parent_layout.addWidget(self._main_content_widget, stretch=1)
 
-        main_layout = QVBoxLayout(main)
+        main_layout = QVBoxLayout(self._main_content_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
@@ -462,8 +464,8 @@ class DashboardPage(QWidget):
         body_layout.setSpacing(24)
 
         self._build_welcome(body_layout)
-        self._build_stats(body_layout)
         self._build_status(body_layout)
+        self._build_quizzes(body_layout)
         self._build_how_to_use(body_layout)
         self._build_footer(body_layout)
         
@@ -579,74 +581,12 @@ class DashboardPage(QWidget):
         wrapper_layout.addWidget(card)
         parent_layout.addWidget(wrapper)
 
-    # ── Stats Row ──────────────────────────────────────────
-
-    def _build_stats(self, parent_layout):
-        wrapper = QWidget()
-        wrapper.setStyleSheet("background: transparent;")
-        wrapper_layout = QVBoxLayout(wrapper)
-        wrapper_layout.setContentsMargins(6, 6, 6, 8)
-        wrapper_layout.setSpacing(0)
-
-        row = QWidget()
-        row.setStyleSheet("background: transparent;")
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
-
-        # We keep references to the value labels
-        self._lbl_sessions = QLabel("—")
-        self._lbl_confidence = QLabel("—")
-        self._lbl_signs = QLabel("—")
-
-        stats_data = [
-            ("Sessions Today", self._lbl_sessions),
-            ("Average Confidence",  self._lbl_confidence),
-            ("Unique Signs Recognized",  self._lbl_signs),
-        ]
-
-        for label, val_lbl in stats_data:
-            card = QFrame()
-            card.setObjectName("statCard")
-            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            card.setStyleSheet(f"""
-                QFrame#statCard {{
-                    background-color: {c('bg_primary')};
-                    border: 1px solid {c('border')};
-                    border-radius: 12px;
-                }}
-                QFrame#statCard QLabel {{
-                    background: transparent;
-                    border: none;
-                }}
-            """)
-            c_layout = QVBoxLayout(card)
-            c_layout.setContentsMargins(20, 16, 20, 16)
-            c_layout.setSpacing(4)
-
-            lbl = QLabel(label)
-            lbl.setStyleSheet(f"color: {c('text_primary')};")
-            _set_font(lbl, size=11)
-
-            val_lbl.setStyleSheet(f"color: {c('text_primary')};")
-            _set_font(val_lbl, size=22, bold=True)
-
-            c_layout.addWidget(lbl)
-            c_layout.addWidget(val_lbl)
-
-            _add_shadow(card)
-            layout.addWidget(card, stretch=1)
-
-        wrapper_layout.addWidget(row)
-        parent_layout.addWidget(wrapper)
-
-    # ── System Status ──────────────────────────────────────
 
     def _build_status(self, parent_layout):
-        lbl = QLabel("System Status")
-        lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
-        _set_font(lbl, size=13, bold=True)
-        parent_layout.addWidget(lbl)
+        self._lbl_system_status_heading = QLabel("System Status")
+        self._lbl_system_status_heading.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        _set_font(self._lbl_system_status_heading, size=13, bold=True)
+        parent_layout.addWidget(self._lbl_system_status_heading)
 
         wrapper = QWidget()
         wrapper.setStyleSheet("background: transparent;")
@@ -718,23 +658,241 @@ class DashboardPage(QWidget):
         parent_layout.addWidget(wrapper)
 
     def _build_how_to_use(self, parent_layout):
-        lbl = QLabel("How to Use")
-        lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
-        _set_font(lbl, size=13, bold=True)
-        parent_layout.addWidget(lbl)
-        
         steps = [
-            ("Open Gesture Translator", "Navigate to the \"Gesture Translator\" section from the main menu."),
-            ("Allow Camera Access", "When prompted, allow the system to access your camera for real-time translation."),
-            ("Start Recording", "Click the \"Start Recording\" button to begin capturing your gestures."),
-            ("Perform Sign Language", "Make sure your hands are clearly visible in the frame as you sign."),
-            ("View Translation", "The translation will appear in the result panel on the right."),
+            (
+                "Open Camera Practice",
+                "Select \"Camera Practice\" from the sidebar to start a live gesture session.",
+            ),
+            (
+                "Allow Camera Access",
+                "Make sure your webcam is enabled in Settings so the live feed can start.",
+            ),
+            (
+                "Pick a Letter Set",
+                "Choose a set (e.g. Set 1 A–E) from the dropdown, then press Start.",
+            ),
+            (
+                "Perform the Sign",
+                "Hold the target letter sign clearly in front of the camera until the hold timer fills.",
+            ),
+            (
+                "Review Your Score",
+                "See your accuracy in the Session Score panel, then try the Flashcard Quiz to test yourself.",
+            ),
         ]
         panel = build_steps_panel(self, steps, card_width=155)
         parent_layout.addWidget(panel)
 
     def _build_footer(self, parent_layout):
-        footer = QLabel("SignDesk v1.0.0  •  © 2026 SignDesk Project  •  All rights reserved")
-        footer.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
-        _set_font(footer, size=11)
-        parent_layout.addWidget(footer, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._lbl_footer = QLabel("SignDesk v1.0.0  •  © 2026 SignDesk Project  •  All rights reserved")
+        self._lbl_footer.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
+        _set_font(self._lbl_footer, size=11)
+        parent_layout.addWidget(self._lbl_footer, 0, Qt.AlignmentFlag.AlignHCenter)
+
+    def _build_quizzes(self, parent_layout):
+        self._lbl_quiz_modes_heading = QLabel("Quiz Modes")
+        self._lbl_quiz_modes_heading.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        _set_font(self._lbl_quiz_modes_heading, size=13, bold=True)
+        parent_layout.addWidget(self._lbl_quiz_modes_heading)
+
+        wrapper = QWidget()
+        wrapper.setStyleSheet("background: transparent;")
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(6, 6, 6, 8)
+        wrapper_layout.setSpacing(0)
+
+        card = QFrame()
+        card.setObjectName("quizCard")
+        card.setStyleSheet(f"""
+            QFrame#quizCard {{
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('border')};
+                border-radius: 12px;
+            }}
+            QFrame#quizCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        
+        c_layout = QHBoxLayout(card)
+        c_layout.setContentsMargins(20, 16, 20, 16)
+        c_layout.setSpacing(14)
+
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(4)
+
+        title_lbl = QLabel("Flashcard Recognition Quiz")
+        title_lbl.setStyleSheet(f"color: {c('text_primary')};")
+        _set_font(title_lbl, size=14, bold=True)
+        info_layout.addWidget(title_lbl)
+
+        desc_lbl = QLabel("Test your memory! Identify ASL handshapes and build your scoring streak.")
+        desc_lbl.setStyleSheet(f"color: {c('text_secondary')};")
+        _set_font(desc_lbl, size=11)
+        info_layout.addWidget(desc_lbl)
+
+        c_layout.addLayout(info_layout, stretch=1)
+
+        start_btn = QPushButton("Start Quiz")
+        start_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        start_btn.setFixedSize(110, 32)
+        start_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c('accent')};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 16px;
+                font-family: 'Segoe UI';
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {c('accent_hover')};
+            }}
+        """)
+        start_btn.clicked.connect(self._launch_flashcard_quiz)
+        c_layout.addWidget(start_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        _add_shadow(card)
+        wrapper_layout.addWidget(card)
+        parent_layout.addWidget(wrapper)
+
+    def _on_theme_changed(self, is_dark: bool):
+        self._update_styles()
+
+    def _update_styles(self):
+        dark = is_dark()
+        self.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        if hasattr(self, '_main_content_widget') and self._main_content_widget:
+            self._main_content_widget.setStyleSheet(f"background-color: {c('bg_secondary')};")
+        
+        if hasattr(self, '_lbl_greeting_top') and self._lbl_greeting_top:
+            self._lbl_greeting_top.setStyleSheet(f"color: {c('text_primary')}; font-family: 'Segoe UI'; font-size: 22px; font-weight: bold;")
+        if hasattr(self, '_search_frame') and self._search_frame:
+            self._search_frame.setStyleSheet(f"""
+                QFrame#searchFrame {{
+                    background-color: {c('input_bg')};
+                    border: 1px solid {c('border')};
+                    border-radius: 18px;
+                }}
+                QFrame#searchFrame QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+        if hasattr(self, '_search_entry') and self._search_entry:
+            self._search_entry.setStyleSheet(f"""
+                QLineEdit {{
+                    border: none;
+                    background: transparent;
+                    color: {c('text_primary')};
+                    font-family: 'Segoe UI';
+                    font-size: 12px;
+                }}
+            """)
+        if hasattr(self, '_avatar_widget') and self._avatar_widget:
+            self._avatar_widget.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {c('accent')};
+                    color: #FFFFFF;
+                    border-radius: 18px;
+                    font-family: 'Segoe UI';
+                    font-size: 14px;
+                    font-weight: bold;
+                }}
+            """)
+            
+        for card in self.findChildren(QFrame, "welcomeCard"):
+            card.setStyleSheet(f"""
+                QFrame#welcomeCard {{
+                    background-color: {c('info_bg')};
+                    border: 1px solid #D1C4E9;
+                    border-radius: 14px;
+                }}
+                QFrame#welcomeCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+        for card in self.findChildren(QFrame, "statCard"):
+            card.setStyleSheet(f"""
+                QFrame#statCard {{
+                    background-color: {c('bg_primary')};
+                    border: 1px solid {c('border')};
+                    border-radius: 12px;
+                }}
+                QFrame#statCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+        for card in self.findChildren(QFrame, "statusCard"):
+            card.setStyleSheet(f"""
+                QFrame#statusCard {{
+                    background-color: {c('bg_primary')};
+                    border: 1px solid {c('border')};
+                    border-radius: 12px;
+                }}
+                QFrame#statusCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+        for card in self.findChildren(QFrame, "quizCard"):
+            card.setStyleSheet(f"""
+                QFrame#quizCard {{
+                    background-color: {c('bg_primary')};
+                    border: 1px solid {c('border')};
+                    border-radius: 12px;
+                }}
+                QFrame#quizCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+            
+        if hasattr(self, '_lbl_system_status_heading') and self._lbl_system_status_heading:
+            self._lbl_system_status_heading.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        # _lbl_how_to_use_heading removed; heading is now part of build_steps_panel
+        if hasattr(self, '_lbl_quiz_modes_heading') and self._lbl_quiz_modes_heading:
+            self._lbl_quiz_modes_heading.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
+        if hasattr(self, '_lbl_footer') and self._lbl_footer:
+            self._lbl_footer.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
+            
+        for card in self.findChildren(QFrame, "statCard") + self.findChildren(QFrame, "statusCard"):
+            for lbl in card.findChildren(QLabel):
+                if lbl not in [self._lbl_camera, self._lbl_privacy, self._lbl_history_log]:
+                    lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
+                    
+        for card in self.findChildren(QFrame, "quizCard"):
+            for lbl in card.findChildren(QLabel):
+                if lbl.text() == "Flashcard Recognition Quiz":
+                    lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
+                elif "streak" in lbl.text().lower() or "test your memory" in lbl.text().lower():
+                    lbl.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; border: none;")
+       
+        card_bg     = "#1E1E2E" if dark else "#FFFFFF"
+        card_border = "#3D3D5C" if dark else "#E2E8F0"
+        title_color = "#C4B5FD" if dark else "#1E293B"
+        desc_color  = "#94A3B8" if dark else "#475569"
+        for card in self.findChildren(QFrame, "stepCard"):
+            card.setStyleSheet(f"""
+                QFrame#stepCard {{
+                    background-color: {card_bg};
+                    border: 1px solid {card_border};
+                    border-radius: 14px;
+                }}
+                QFrame#stepCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+            for div in card.findChildren(QFrame, "stepDivider"):
+                div.setStyleSheet(f"QFrame#stepDivider {{ background: {card_border}; border: none; border-radius: 0px; }}")
+            for lbl in card.findChildren(QLabel, "stepTitle"):
+                lbl.setStyleSheet(f"color: {title_color};")
+            for lbl in card.findChildren(QLabel, "stepDesc"):
+                lbl.setStyleSheet(f"color: {desc_color};")
+               
+        self.refresh_dashboard()

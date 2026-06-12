@@ -55,6 +55,32 @@ class GestureRecognizer:
         # Stage 1 — Compare landmarks against gesture library
         raw_gesture, raw_score = self._comparator.best_match(landmarks)
 
+        # ── Motion detection filter (distinguish I/J and D/Z) ──
+        if raw_gesture in ["I", "J", "D", "Z"] and landmarks and len(landmarks) == 21:
+            if not hasattr(self, "_history_landmarks"):
+                self._history_landmarks = []
+            
+            # Track coordinates (x, y)
+            self._history_landmarks.append([(lm[0], lm[1]) for lm in landmarks])
+            if len(self._history_landmarks) > 10:
+                self._history_landmarks.pop(0)
+
+            if len(self._history_landmarks) >= 5:
+                movement = 0.0
+                # Track wrist (0), index tip (8), and pinky tip (20)
+                for idx in [0, 8, 20]:
+                    x_coords = [f[idx][0] for f in self._history_landmarks[-5:]]
+                    y_coords = [f[idx][1] for f in self._history_landmarks[-5:]]
+                    movement += (max(x_coords) - min(x_coords)) + (max(y_coords) - min(y_coords))
+
+                # If movement is low, hand is stationary -> override motion-based signs
+                is_moving = movement > 0.06
+                if not is_moving:
+                    if raw_gesture == "J":
+                        raw_gesture = "I"
+                    elif raw_gesture == "Z":
+                        raw_gesture = "D"
+
         # Stage 2 — Confidence threshold filter
         filtered_gesture, filtered_score = self._filter.filter(
             raw_gesture, raw_score

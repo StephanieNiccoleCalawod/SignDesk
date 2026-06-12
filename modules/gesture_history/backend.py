@@ -1,39 +1,56 @@
 """
 modules/gesture_history/backend.py
-SQLite implementation for logging ASL gestures and managing history settings.
+SQLite implementation for quiz result logging.
 
-Encryption layer (v2)
----------------------
-gesture_history.translated_text_enc stores a Fernet ciphertext.
-gesture_history.translated_text is cleared (NULL) after migration.
-gesture_history.gesture_enc stores a Fernet ciphertext.
-gesture_history.gesture is cleared (NULL) after migration.
-All writes encrypt the value; all reads decrypt it transparently.
+Schema (v3)
+-----------
+Replaces the legacy gesture_history encryption table with a clean
+quiz_results table that stores one row per quiz attempt (Camera Practice
+or Flashcard Quiz).  The legacy table is preserved untouched for safety.
 
-FIX: init_history_db() now syncs the DB 'logging_enabled' setting from
-     config (privacy.gesture_history_log) so that the Settings toggle and
-     the DB are always in agreement on startup.
-
-DATA ISOLATION: All user-scoped functions require a user_id parameter.
-     The gesture_history table includes a user_id column with a foreign key
-     to users(id). All SELECT, INSERT, DELETE queries are scoped by user_id.
+quiz_results columns
+--------------------
+  id         INTEGER PK AUTOINCREMENT
+  username   TEXT NOT NULL          -- login username of the user
+  source     TEXT NOT NULL          -- 'camera_practice' | 'flashcard_quiz'
+  letter     TEXT NOT NULL          -- target ASL letter e.g. 'A'
+  result     TEXT NOT NULL          -- 'correct' | 'missed' | 'skipped'
+  confidence REAL                   -- CNN confidence 0-1, NULL for flashcard
+  set_name   TEXT                   -- e.g. 'Set 1 (A-E)', 'Random 10'
+  logged_at  TEXT NOT NULL          -- ISO-8601 timestamp
 """
 
-from datetime import datetime
+from datetime import datetime, date
 from core.database import get_connection
-from core.crypto import encrypt, decrypt
+from core.crypto import encrypt, decrypt  # kept for legacy compat
 
+
+# ── Init ──────────────────────────────────────────────────────────────────────
 
 def init_history_db() -> tuple[bool, str]:
     """
-    Creates gesture_history and gesture_history_settings tables.
-    Seeds default settings if missing, then syncs logging_enabled from config.
-    Runs the translated_text encryption migration on any existing rows.
+    Creates the quiz_results table (and legacy tables if absent).
+    Safe to call multiple times — uses CREATE TABLE IF NOT EXISTS.
     """
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
 
+            # ── New table ────────────────────────────────────────────────────
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS quiz_results (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username   TEXT NOT NULL,
+                    source     TEXT NOT NULL,
+                    letter     TEXT NOT NULL,
+                    result     TEXT NOT NULL,
+                    confidence REAL,
+                    set_name   TEXT,
+                    logged_at  TEXT NOT NULL
+                )
+            """)
+
+            # ── Legacy tables (preserved, not used for new writes) ───────────
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS gesture_history (
                     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,41 +60,17 @@ def init_history_db() -> tuple[bool, str]:
                     translated_text     TEXT,
                     translated_text_enc TEXT DEFAULT '',
                     confidence          REAL,
-                    logged_at           TEXT NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
+                    logged_at           TEXT NOT NULL
                 )
             """)
-
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS gesture_history_settings (
                     key   TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 )
             """)
-
-            # ── Migrations ────────────────────────────────────────────────
-            cursor.execute("PRAGMA table_info(gesture_history)")
-            columns = [col[1] for col in cursor.fetchall()]
-
-            if "user_id" not in columns:
-                cursor.execute(
-                    "ALTER TABLE gesture_history ADD COLUMN user_id INTEGER REFERENCES users(id)"
-                )
-                cursor.execute("DELETE FROM gesture_history WHERE user_id IS NULL")
-
-            if "translated_text_enc" not in columns:
-                cursor.execute(
-                    "ALTER TABLE gesture_history ADD COLUMN translated_text_enc TEXT DEFAULT ''"
-                )
-
-            if "gesture_enc" not in columns:
-                cursor.execute(
-                    "ALTER TABLE gesture_history ADD COLUMN gesture_enc TEXT DEFAULT ''"
-                )
-
-            # Seed default settings
             defaults = {
-                "logging_enabled":     "0",
+                "logging_enabled":     "1",   # always on for quiz results
                 "include_confidence":  "1",
                 "include_translation": "1",
             }
@@ -87,95 +80,119 @@ def init_history_db() -> tuple[bool, str]:
                     (k, v),
                 )
 
-        # Encrypt any existing plaintext translated_text rows
-        _migrate_translated_text_encryption()
-
-        # Encrypt any existing plaintext gesture rows
-        _migrate_gesture_encryption()
-
-        # Sync logging flag from config
-        _sync_logging_flag_from_config()
-
         return True, "History database initialized successfully."
     except Exception as e:
         print(f"[history] init_history_db error: {e}")
-        return False, "Failed to initialize history database. Please restart the application."
+        return False, "Failed to initialize history database."
 
 
-def _migrate_translated_text_encryption():
-    """Encrypt any gesture_history rows whose translated_text is still plaintext."""
+# ── Write ─────────────────────────────────────────────────────────────────────
+
+def log_quiz_result(
+    username: str,
+    source: str,        # 'camera_practice' | 'flashcard_quiz'
+    letter: str,
+    result: str,        # 'correct' | 'missed' | 'skipped'
+    confidence: float | None = None,
+    set_name: str | None = None,
+) -> bool:
+    """
+    Logs one quiz attempt to quiz_results.
+    Always succeeds regardless of any privacy setting — quiz results
+    are practice data, not surveillance.
+    """
+    if not username or not letter or not result:
+        return False
     try:
+        logged_at = datetime.now().isoformat(timespec="seconds")
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, translated_text
-                  FROM gesture_history
-                 WHERE translated_text IS NOT NULL
-                   AND translated_text != ''
-                   AND (translated_text_enc IS NULL OR translated_text_enc = '')
-                """
+                INSERT INTO quiz_results
+                    (username, source, letter, result, confidence, set_name, logged_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (username, source, letter.upper(), result, confidence, set_name, logged_at),
             )
-            rows = cursor.fetchall()
-            for row in rows:
-                cursor.execute(
-                    """
-                    UPDATE gesture_history
-                       SET translated_text_enc = ?,
-                           translated_text     = NULL
-                     WHERE id = ?
-                    """,
-                    (encrypt(row["translated_text"]), row["id"]),
-                )
-    except Exception:
-        pass  # Non-fatal — migration will retry next startup
+        return True
+    except Exception as e:
+        print(f"[history] log_quiz_result error: {e}")
+        return False
 
 
-def _migrate_gesture_encryption():
-    """Encrypt any gesture_history rows whose gesture is still plaintext."""
+# ── Read ──────────────────────────────────────────────────────────────────────
+
+def get_quiz_results(username: str) -> list[dict]:
+    """Returns all quiz_results for a user, newest first."""
+    if not username:
+        return []
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """
-                SELECT id, gesture
-                  FROM gesture_history
-                 WHERE gesture IS NOT NULL
-                   AND gesture != ''
-                   AND (gesture_enc IS NULL OR gesture_enc = '')
-                """
+                "SELECT * FROM quiz_results WHERE username = ? ORDER BY logged_at DESC",
+                (username,),
             )
             rows = cursor.fetchall()
-            for row in rows:
-                cursor.execute(
-                    """
-                    UPDATE gesture_history
-                       SET gesture_enc = ?,
-                           gesture     = ''
-                     WHERE id = ?
-                    """,
-                    (encrypt(row["gesture"]), row["id"]),
-                )
-    except Exception:
-        pass  # Non-fatal — migration will retry next startup
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[history] get_quiz_results error: {e}")
+        return []
 
 
-def _sync_logging_flag_from_config():
-    """
-    Reads privacy.gesture_history_log from config and writes the matching
-    value into gesture_history_settings so the DB and config agree.
-    Called once at startup from init_history_db().
-    """
+def get_record_count(username: str) -> int:
+    """Total quiz attempts for a user."""
+    if not username:
+        return 0
     try:
-        from core.config import config
-        enabled = config.get("privacy.gesture_history_log", False)
-        set_setting("logging_enabled", "1" if enabled else "0")
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM quiz_results WHERE username = ?",
+                (username,),
+            )
+            row = cursor.fetchone()
+            return row["count"] if row else 0
     except Exception:
-        pass  # config not available in test environments
+        return 0
 
+
+def clear_history(username: str) -> tuple[bool, str]:
+    """Deletes all quiz_results for a user."""
+    if not username:
+        return False, "No username provided."
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM quiz_results WHERE username = ?", (username,))
+        return True, "All practice records cleared successfully."
+    except Exception as e:
+        print(f"[history] clear_history error: {e}")
+        return False, "Failed to clear records."
+
+
+def today_count(username: str) -> int:
+    """Number of quiz attempts today for a user."""
+    if not username:
+        return 0
+    try:
+        today = date.today().isoformat()
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM quiz_results WHERE username = ? AND logged_at LIKE ?",
+                (username, f"{today}%"),
+            )
+            row = cursor.fetchone()
+            return row["count"] if row else 0
+    except Exception:
+        return 0
+
+
+# ── Legacy shims (kept so old imports don't break) ────────────────────────────
 
 def get_setting(key: str) -> str:
-    """Returns the setting value or an empty string if not found."""
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -189,124 +206,22 @@ def get_setting(key: str) -> str:
 
 
 def set_setting(key: str, value: str) -> None:
-    """Inserts or replaces a setting value."""
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT OR REPLACE INTO gesture_history_settings (key, value) VALUES (?, ?)",
-                (key, value)
+                (key, value),
             )
     except Exception:
         pass
 
 
-def log_gesture(
-    user_id: int, gesture: str, translated_text: str, confidence: float
-) -> bool:
-    """
-    Logs a gesture for a specific user if logging_enabled is '1'.
-    translated_text is stored encrypted in translated_text_enc;
-    the plaintext translated_text column is left NULL.
-    """
-    if user_id is None:
-        return False
-    try:
-        if get_setting("logging_enabled") != "1":
-            return False
-
-        final_translation = (
-            translated_text if get_setting("include_translation") == "1" else None
-        )
-        final_confidence = (
-            confidence if get_setting("include_confidence") == "1" else None
-        )
-        logged_at = datetime.now().isoformat(timespec="seconds")
-
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO gesture_history
-                    (user_id, gesture, gesture_enc, translated_text,
-                     translated_text_enc, confidence, logged_at)
-                VALUES (?, '', ?, NULL, ?, ?, ?)
-                """,
-                (
-                    user_id,
-                    encrypt(gesture),
-                    encrypt(final_translation) if final_translation is not None else "",
-                    final_confidence,
-                    logged_at,
-                )
-            )
-        return True
-    except Exception:
-        return False
-
-
 def get_history(user_id: int) -> list[dict]:
-    """
-    Returns gesture history records for a specific user, ordered by time.
-    Decrypts translated_text_enc transparently so callers receive plaintext.
-    """
-    if user_id is None:
-        return []
-    try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM gesture_history WHERE user_id = ? ORDER BY logged_at DESC",
-                (user_id,)
-            )
-            rows = cursor.fetchall()
-
-        result = []
-        for row in rows:
-            d = dict(row)
-            # Prefer the encrypted column; fall back to the legacy plaintext column
-            enc = d.get("translated_text_enc") or ""
-            plain = d.get("translated_text") or ""
-            d["translated_text"] = decrypt(enc) if enc else plain
-
-            g_enc = d.get("gesture_enc") or ""
-            g_plain = d.get("gesture") or ""
-            d["gesture"] = decrypt(g_enc) if g_enc else g_plain
-            result.append(d)
-
-        return result
-    except Exception:
-        return []
+    """Legacy shim — returns empty list. Use get_quiz_results() instead."""
+    return []
 
 
-def clear_history(user_id: int) -> tuple[bool, str]:
-    """Clears gesture history records for a specific user only."""
-    if user_id is None:
-        return False, "No user session — cannot clear history."
-    try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "DELETE FROM gesture_history WHERE user_id = ?", (user_id,)
-            )
-        return True, "All gesture history records have been cleared successfully."
-    except Exception as e:
-        print(f"[history] clear_history error: {e}")
-        return False, "Failed to clear history. Please try again."
-
-
-def get_record_count(user_id: int) -> int:
-    """Returns the total number of logged gestures for a specific user."""
-    if user_id is None:
-        return 0
-    try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT COUNT(*) as count FROM gesture_history WHERE user_id = ?",
-                (user_id,)
-            )
-            row = cursor.fetchone()
-            return row["count"] if row else 0
-    except Exception:
-        return 0
+def log_gesture(user_id, gesture, translated_text, confidence) -> bool:
+    """Legacy shim — no-op. Use log_quiz_result() instead."""
+    return False
