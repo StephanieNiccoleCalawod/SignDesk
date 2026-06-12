@@ -1,8 +1,4 @@
-"""
-password_reset_email.py - Password Reset Email Sender
-Sends a branded OTP email for the Forgot Password flow.
-Uses the same SMTP machinery as the registration verification emails.
-"""
+
 
 import smtplib
 from email.mime.text import MIMEText

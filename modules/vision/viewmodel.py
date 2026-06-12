@@ -4,7 +4,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from core.config import config
 from modules.vision.camera import CameraManager
 from modules.vision.tracker import HandTracker
-from modules.gestures.engine import GestureRecognizer
+from modules.gestures.recognizer import GestureRecognizer
 from modules.speech.word_assembler import word_assembler
 from modules.speech.tts import TTSEngine
 from modules.gesture_history.backend import log_quiz_result

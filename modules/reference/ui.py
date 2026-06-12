@@ -1,10 +1,4 @@
-"""
-modules/reference/ui.py
-========================
-Rebuilt UI implementation for ASL Alphabet Reference Chart page.
-Uses existing modular reusable widgets: Sidebar, SearchBar, FilterPill, LetterCard, DetailPanel.
-Fully integrates search, filtering, letter selection, and practice navigation.
-"""
+
 
 import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QGridLayout, QFrame, QMessageBox

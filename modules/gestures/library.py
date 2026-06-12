@@ -1,19 +1,3 @@
-"""
-library.py - ASL Gesture Library
-Predefined ASL alphabet gesture definitions using finger state rules.
-Maps to: SD003 (Gesture Recognition Library)
-
-Each gesture is defined by a set of finger states and positional rules
-based on the 21 MediaPipe hand landmarks.
-
-MediaPipe Landmark Indices:
-    0: WRIST
-    1-4: THUMB (CMC, MCP, IP, TIP)
-    5-8: INDEX (MCP, PIP, DIP, TIP)
-    9-12: MIDDLE (MCP, PIP, DIP, TIP)
-    13-16: RING (MCP, PIP, DIP, TIP)
-    17-20: PINKY (MCP, PIP, DIP, TIP)
-"""
 
 # Landmark index constants for readability
 WRIST = 0

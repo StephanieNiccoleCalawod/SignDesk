@@ -1,23 +1,4 @@
-"""
-modules/auth/ui.py  — SignDesk Auth UI  (PyQt6, fully fixed)
 
-Fixes applied
-─────────────
-1. CAPS → Title case labels  ("USERNAME" → "Username", etc.)
-2. OTP email failure now BLOCKS navigation (no silent bypass)
-3. Row background blocks fixed — QWidget rows are transparent,
-   QFrame cards use explicit style; global QFrame QSS no longer
-   bleeds onto plain container widgets
-4. Eye icon visible — objectName scopes the style so the global
-   QPushButton accent rule can't override it; Unicode 👁/🙈 used
-   as a reliable cross-platform glyph
-5. Buttons visible — C_WHITE / C_ACCENT resolved to plain hex
-   strings (they are tuples in theme.py — indexing [0] is required)
-6. Spacing tightened — form_wrap spacing set to 6px; accent-label
-   rows shrink-wrapped so there's no phantom height between fields
-7. All input fields (username, email, password) share identical
-   height (44 px) and QSS so they look uniform
-"""
 
 from __future__ import annotations
 import threading
@@ -41,7 +22,7 @@ from core.email_service import (
 )
 from core.email_config import OTP_RESEND_COOLDOWN, OTP_EXPIRY_MINUTES, OTP_MAX_RESENDS
 from modules.auth.service import (
-    login_user, register_user, validate_password,
+    login_user, validate_password,
     validate_registration, check_duplicate_username, check_duplicate_email,
     verify_user, resend_verification_code, create_verified_user,
 )

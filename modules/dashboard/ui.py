@@ -1,7 +1,4 @@
-"""
-modules/dashboard/ui.py - Dashboard UI
-PyQt6 migration — CustomTkinter dependency fully removed.
-"""
+
 
 import os
 from PyQt6.QtWidgets import (
@@ -12,22 +9,9 @@ from PyQt6.QtCore import Qt, QSize, QTimer, QRect, QPoint
 from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QCursor
 
 from core.theme import c, is_dark
-from core.ui_helpers import create_nav_item, build_steps_panel, _set_font, _add_shadow
+from core.ui_helpers import build_steps_panel, _set_font, _add_shadow
 from modules.dashboard.dashboard_service import get_dashboard_summary, search_dashboard
 
-class GradientSidebar(QFrame):
-    """Sidebar with vertical gradient background — respects current theme mode."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedWidth(210)
-
-    def paintEvent(self, event):
-        dark = is_dark()
-        painter = QPainter(self)
-        grad = QLinearGradient(0, 0, 0, self.height())
-        grad.setColorAt(0, QColor(c("panel_left", dark=dark)))
-        grad.setColorAt(1, QColor(c("panel_left_end", dark=dark)))
-        painter.fillRect(self.rect(), grad)
 
 class SearchDropdown(QFrame):
     def __init__(self, parent):
@@ -337,103 +321,6 @@ class DashboardPage(QWidget):
         layout.setSpacing(0)
 
         self._build_main_area(layout)
-
-    # ══════════════════════════════════════════════════════════
-    # SIDEBAR
-    # ══════════════════════════════════════════════════════════
-
-    def _build_sidebar(self, parent_layout):
-        sidebar = GradientSidebar(self)
-        parent_layout.addWidget(sidebar)
-
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(16, 24, 16, 20)
-        layout.setSpacing(0)
-
-        brand_layout = QHBoxLayout()
-        brand_layout.setContentsMargins(0, 0, 0, 0)
-        brand_layout.setSpacing(10)
-        brand_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        logo_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "assets", "logo.png"
-        )
-
-        if os.path.exists(logo_path):
-            logo_lbl = QLabel()
-            pixmap = QPixmap(logo_path).scaled(
-                36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-            )
-            logo_lbl.setPixmap(pixmap)
-            logo_lbl.setStyleSheet("background: transparent;")
-            brand_layout.addWidget(logo_lbl)
-
-        title_lbl = QLabel("SignDesk")
-        title_lbl.setStyleSheet(f"color: {'#FFFFFF' if is_dark() else '#2C3358'}; background: transparent;")
-        _set_font(title_lbl, size=16, bold=True)
-        brand_layout.addWidget(title_lbl)
-
-        layout.addLayout(brand_layout)
-        
-        div1 = QFrame()
-        div1.setFixedHeight(1)
-        div1.setStyleSheet(f"background-color: {c('border')}; border: none;")
-        layout.addSpacing(16)
-        layout.addWidget(div1)
-        layout.addSpacing(16)
-
-        nav_layout = QVBoxLayout()
-        nav_layout.setContentsMargins(0, 0, 0, 0)
-        nav_layout.setSpacing(2)
-
-        nav_layout.addWidget(create_nav_item(sidebar, "■", "Dashboard", is_active=True))
-        nav_layout.addWidget(create_nav_item(sidebar, "◈", "Gesture Translator", command=self._launch_gesture_detection))
-        nav_layout.addWidget(create_nav_item(sidebar, "◆", "Flashcard Quiz", command=self._launch_flashcard_quiz))
-        nav_layout.addWidget(create_nav_item(sidebar, "▣", "Sign Dictionary", command=self._launch_reference_chart))
-        nav_layout.addWidget(create_nav_item(sidebar, "▲", "Gesture History", command=self._launch_gesture_history))
-
-        layout.addLayout(nav_layout)
-        layout.addStretch()
-
-        div2 = QFrame()
-        div2.setFixedHeight(1)
-        div2.setStyleSheet(f"background-color: {c('border')}; border: none;")
-        layout.addWidget(div2)
-        layout.addSpacing(8)
-
-        bottom_layout = QVBoxLayout()
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(2)
-
-        bottom_layout.addWidget(create_nav_item(sidebar, "◎", "Settings", command=self._launch_settings))
-
-        logout_btn = QWidget()
-        logout_btn.setFixedHeight(38)
-        logout_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        logout_btn.setStyleSheet("background: transparent; border-radius: 10px;")
-        lo_layout = QHBoxLayout(logout_btn)
-        lo_layout.setContentsMargins(12, 0, 12, 0)
-        lo_layout.setSpacing(8)
-        
-        lo_text = QLabel("Logout")
-        lo_text.setStyleSheet("color: #FF8A80; background: transparent; border: none;")
-        _set_font(lo_text, size=12, bold=False)
-        
-        lo_layout.addWidget(lo_text)
-        lo_layout.addStretch()
-
-        def enterEvent(e): logout_btn.setStyleSheet(f"background-color: {c('input_bg')}; border-radius: 10px;")
-        def leaveEvent(e): logout_btn.setStyleSheet("background-color: transparent; border-radius: 10px;")
-        def mousePressEvent(e): 
-            if e.button() == Qt.MouseButton.LeftButton:
-                self._on_logout()
-        logout_btn.enterEvent = enterEvent
-        logout_btn.leaveEvent = leaveEvent
-        logout_btn.mousePressEvent = mousePressEvent
-
-        bottom_layout.addWidget(logout_btn)
-        layout.addLayout(bottom_layout)
 
     # ══════════════════════════════════════════════════════════
     # MAIN CONTENT AREA

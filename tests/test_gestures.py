@@ -25,7 +25,7 @@ if PROJECT_ROOT not in sys.path:
 from modules.gestures.comparator import LandmarkComparator
 from modules.gestures.confidence import ConfidenceFilter, StabilityBuffer
 from modules.gestures.recognizer import GestureRecognizer
-from modules.gestures.engine import GestureRecognizer as EngineGestureRecognizer
+
 from modules.gestures.library import ASL_GESTURES, get_finger_states, get_finger_curl
 from tests.test_landmarks import (
     SYNTHETIC_GESTURES, make_garbage_landmarks, make_partial_landmarks,
@@ -309,7 +309,6 @@ class TestOfflineValidation(unittest.TestCase):
         "modules.gestures.comparator",
         "modules.gestures.confidence",
         "modules.gestures.recognizer",
-        "modules.gestures.engine",
     ]
 
     FORBIDDEN_IMPORTS = {
@@ -403,10 +402,7 @@ class TestEndToEndIntegration(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIsInstance(result, tuple)
 
-    def test_engine_shim_backward_compat(self):
-        """Importing from engine.py should give the same GestureRecognizer."""
-        self.assertIs(EngineGestureRecognizer, GestureRecognizer,
-                      "engine.py shim should re-export recognizer.GestureRecognizer")
+
 
     def test_recognizer_exposes_confidence_threshold(self):
         """vision/ui.py accesses CONFIDENCE_THRESHOLD — must exist."""

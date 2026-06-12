@@ -1,10 +1,4 @@
-"""
-modules/gesture_history/log_viewer.py
-Full-page viewer for saved gesture history logs.
-Accessible from Settings → Privacy & Data → "View saved gesture log".
-Supports CSV download.
-PyQt6 migration.
-"""
+
 
 import csv
 import os
@@ -33,20 +27,6 @@ C_YELLOW_BG  = "#fef3c7"
 C_YELLOW_FG  = "#b45309"
 
 
-class _GradientSidebar(QFrame):
-    """Sidebar with vertical gradient background."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedWidth(210)
-
-    def paintEvent(self, event):
-        from core.theme import is_dark
-        dark = is_dark()
-        painter = QPainter(self)
-        grad = QLinearGradient(0, 0, 0, self.height())
-        grad.setColorAt(0, QColor(c("panel_left", dark=dark)))
-        grad.setColorAt(1, QColor(c("panel_left_end", dark=dark)))
-        painter.fillRect(self.rect(), grad)
 
 
 def _fmt_datetime(iso: str) -> tuple[str, str]:

@@ -1,8 +1,4 @@
-"""
-modules/gesture_history/ui.py
-Practice Log viewer — shows quiz_results rows for the logged-in user.
-Columns: #  |  Source  |  Letter  |  Result  |  Confidence  |  Set  |  Date  |  Time
-"""
+
 
 import csv
 from datetime import datetime, date

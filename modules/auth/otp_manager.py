@@ -1,14 +1,4 @@
-"""
-otp_manager.py - Password Reset OTP Lifecycle Manager
-Handles OTP generation, storage, verification, invalidation, and password update
-for the Forgot Password flow. Uses the otp_tokens table in SQLite.
 
-Encryption layer (v2)
----------------------
-All email lookups in both `users` and `otp_tokens` use hmac_hash().
-The `email` column in otp_tokens stores the HMAC hash — the plaintext
-email is never written to the database.
-"""
 
 import bcrypt
 from datetime import datetime, timedelta

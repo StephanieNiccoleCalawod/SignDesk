@@ -1,9 +1,4 @@
-"""
-modules/quiz/ui.py
-===================
-Sprint 5 Flashcard Recognition Quiz Page for SignDesk.
-Implements randomization, feedback, progression, and session scoring.
-"""
+
 
 import os
 import random

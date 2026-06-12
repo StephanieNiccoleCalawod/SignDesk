@@ -1,8 +1,4 @@
-"""
-otp_verification_window.py - OTP Verification UI (Password Reset)
-Step 2 of the password reset flow: 6-digit OTP entry with auto-advance.
-PyQt6 implementation.
-"""
+
 
 import threading
 from PyQt6.QtWidgets import (

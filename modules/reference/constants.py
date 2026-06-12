@@ -1,8 +1,5 @@
 # modules/reference/constants.py
-"""
-Constants and static metadata for the ASL Reference page.
-Contains descriptions, tips, and properties for all 26 letters of the ASL Manual Alphabet.
-"""
+
 
 LETTER_METADATA = {
     "A": {

@@ -1,12 +1,4 @@
-"""
-confidence.py - Confidence Threshold Filter & Stability Buffer
-Maps to: Sprint 4 T-003
 
-Provides two mechanisms to ensure recognition quality:
-1. ConfidenceFilter — rejects scores below configurable thresholds
-2. StabilityBuffer — requires N consecutive frames of the same gesture
-   before confirming, preventing flicker between gestures
-"""
 
 
 class ConfidenceFilter:

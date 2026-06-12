@@ -1,8 +1,4 @@
-"""
-reset_password_window.py - Reset Password UI
-Step 3 of the password reset flow: new password entry with strength indicator.
-PyQt6 implementation.
-"""
+
 
 import re
 import threading

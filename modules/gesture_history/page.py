@@ -1,8 +1,4 @@
-"""
-modules/gesture_history/page.py
-Full-page wrapper for GestureHistorySection.
-PyQt6 migration — sidebar layout matching dashboard/gesture pages.
-"""
+
 
 import os
 from PyQt6.QtWidgets import (
@@ -18,21 +14,6 @@ from modules.gesture_history.ui import GestureHistorySection
 from modules.gesture_history.backend import init_history_db
 
 
-class GradientSidebar(QFrame):
-    """Sidebar with vertical gradient background — respects current theme mode."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedWidth(210)
-
-    def paintEvent(self, event):
-        from core.theme import is_dark
-        dark = is_dark()
-        painter = QPainter(self)
-        grad = QLinearGradient(0, 0, 0, self.height())
-        grad.setColorAt(0, QColor(c("panel_left", dark=dark)))
-        grad.setColorAt(1, QColor(c("panel_left_end", dark=dark)))
-        painter.fillRect(self.rect(), grad)
 
 
 class GestureHistoryPage(QWidget):

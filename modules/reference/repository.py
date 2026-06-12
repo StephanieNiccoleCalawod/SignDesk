@@ -1,8 +1,5 @@
 # modules/reference/repository.py
-"""
-Repository module for accessing ASL Alphabet reference data.
-Exposes queries for retrieving and searching reference letters.
-"""
+
 import os
 from .models import ASLReferenceLetter
 from .constants import LETTER_METADATA

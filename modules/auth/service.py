@@ -1,14 +1,4 @@
-"""
-service.py - Authentication Logic
-Handles user login and registration with SQLite and bcrypt.
-Includes email verification support for account creation.
 
-Encryption layer (v2)
----------------------
-• All DB lookups on username/email use hmac_hash() — never plaintext.
-• New rows store hmac_hash in the indexed column + Fernet ciphertext in _enc column.
-• Passwords continue to use bcrypt (unchanged).
-"""
 
 import bcrypt
 from core.database import get_connection
@@ -127,65 +117,6 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
         print(f"[auth] login_user error: {e}")
         log_event("LOGIN_FAILED", hmac_hash(username), "Internal error")
         return False, "An unexpected error occurred. Please try again."
-
-
-def register_user(username: str, email: str, password: str) -> tuple[bool, str, str]:
-    """
-    Legacy: Creates a new user account as unverified.
-    NOTE: Use the in-memory OTP flow + create_verified_user() instead.
-    Kept for backwards compatibility only.
-    """
-    import random
-    import string
-    from datetime import datetime
-    from core.email_service import get_otp_expiry
-    try:
-        username_hash = hmac_hash(username)
-        email_hash    = hmac_hash(email, normalize=True)
-
-        with get_connection() as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username_hash,))
-            if cursor.fetchone():
-                return False, "This username already exists.", ""
-
-            cursor.execute("SELECT 1 FROM users WHERE email = ?", (email_hash,))
-            if cursor.fetchone():
-                return False, "An account with this email already exists.", ""
-
-            password_hash = bcrypt.hashpw(
-                password.encode("utf-8"),
-                bcrypt.gensalt()
-            ).decode("utf-8")
-
-            verification_code = ''.join(random.choices(string.digits, k=6))
-            expiry_time = get_otp_expiry()
-
-            cursor.execute(
-                """
-                INSERT INTO users
-                    (username, email, username_enc, email_enc,
-                     name, password_hash, email_verified, verification_code, verification_expiry)
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-                """,
-                (
-                    username_hash,
-                    email_hash,
-                    encrypt(username),
-                    encrypt(email),
-                    username,           # seed display name from plaintext
-                    password_hash,
-                    verification_code,
-                    expiry_time,
-                )
-            )
-
-        return True, "Account created tentatively.", verification_code
-
-    except Exception as e:
-        print(f"[auth] register_user error: {e}")
-        return False, "An unexpected error occurred. Please try again.", ""
 
 
 def create_verified_user(username: str, email: str, password: str) -> tuple[bool, str]:

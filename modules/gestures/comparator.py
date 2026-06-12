@@ -1,8 +1,4 @@
-"""
-comparator.py - Landmark Comparison Engine
-Now delegates to CNNPredictor instead of rule-based library.
-Maps to: Sprint 4 T-002
-"""
+
 
 from modules.gestures.cnn_predictor import CNNPredictor
 

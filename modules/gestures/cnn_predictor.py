@@ -1,11 +1,4 @@
-"""
-cnn_predictor.py - Landmark-Based Gesture Predictor
-Predicts ASL gestures directly from MediaPipe hand landmarks.
-Maps to: SD003 (Gesture Recognition)
 
-Uses a Dense neural network trained on 63 landmark features
-(21 landmarks × 3 coords). No image conversion needed.
-"""
 
 import os
 import json
