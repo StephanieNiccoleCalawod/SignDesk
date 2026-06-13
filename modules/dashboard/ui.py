@@ -5,8 +5,8 @@ from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
     QScrollArea, QLineEdit, QMessageBox, QGridLayout, QSizePolicy, QPushButton
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, QRect, QPoint
-from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QCursor
+from PyQt6.QtCore import Qt, QSize, QTimer, QRect, QPoint, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QCursor, QPen, QFont
 
 from core.theme import c, is_dark
 from core.ui_helpers import build_steps_panel, _set_font, _add_shadow
@@ -152,6 +152,87 @@ class ProfileDropdown(QFrame):
             
         self.adjustSize()
 
+class AnalyticsRingCard(QFrame):
+    """
+    Animated circular progress card for Dashboard Analytics.
+    """
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.setObjectName("analyticsCard")
+        self.setMinimumSize(160, 160)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        self.title = title
+        self.target_percentage = 0.0
+        self._current_val = 0.0
+        
+        # We will use rgba for the lavender/violet color theme
+        self.bg_color = "rgba(108, 99, 255, 20)"  # Track background
+        self.fg_color = "rgba(108, 99, 255, 255)" # Progress arc
+        
+        self.anim = QPropertyAnimation(self, b"currentVal")
+        self.anim.setDuration(1200)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def set_percentage(self, val: float):
+        self.target_percentage = val
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(val)
+        self.anim.start()
+
+    def _get_val(self) -> float:
+        return self._current_val
+
+    def _set_val(self, v: float):
+        self._current_val = v
+        self.update()
+
+    currentVal = pyqtProperty(float, _get_val, _set_val)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Draw card background
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#E8E2F9")) # Light lavender background
+        painter.drawRoundedRect(self.rect(), 14, 14)
+
+        # Draw ring track - maintain a circle centered horizontally
+        padding = 24
+        ring_size = min(self.width() - padding * 2, self.height() - 40 - padding)
+        center_x = self.width() // 2
+        center_y = (self.height() - 36) // 2
+        ring_rect = QRect(center_x - ring_size // 2, center_y - ring_size // 2, ring_size, ring_size)
+
+        track_pen = QPen(QColor(self.bg_color), 14)
+        painter.setPen(track_pen)
+        painter.drawEllipse(ring_rect)
+
+        # Draw progress arc
+        if self._current_val > 0:
+            arc_pen = QPen(QColor(self.fg_color), 14, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            painter.setPen(arc_pen)
+            span = int(-self._current_val * 3.6 * 16)
+            painter.drawArc(ring_rect, 90 * 16, span)
+
+        # Draw percentage text
+        painter.setPen(QColor("#000000"))
+        font = QFont("Segoe UI", 20, QFont.Weight.Medium)
+        painter.setFont(font)
+        text_rect = ring_rect.adjusted(0, 0, 0, 0)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, f"{int(self._current_val)}%")
+
+        # Draw title text
+        painter.setPen(QColor("#000000"))
+        title_font = QFont("Segoe UI", 11)
+        painter.setFont(title_font)
+        title_rect = QRect(0, self.height() - 36, self.width(), 30)
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, self.title)
+        
+        painter.end()
+
+
 class DashboardPage(QWidget):
     def __init__(self, parent, app, username: str):
         super().__init__(parent)
@@ -159,13 +240,11 @@ class DashboardPage(QWidget):
         self._username = username
         self.setStyleSheet(f"background-color: {c('bg_secondary')};")
         
-        # We will keep references to labels to update them dynamically
-        self._lbl_greeting_top = None
+        # Keep references for dynamic updates
         self._lbl_greeting_card = None
-        
-        self._lbl_camera = None
-        self._lbl_privacy = None
-        self._lbl_history_log = None
+        self._ring_total_sessions = None
+        self._ring_avg_learning = None
+        self._ring_days_learned = None
         
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -196,31 +275,15 @@ class DashboardPage(QWidget):
         if not summary:
             return
             
-        if self._lbl_greeting_top:
-            self._lbl_greeting_top.setText(f"{summary.greeting}, {summary.display_name}")
         if self._lbl_greeting_card:
             self._lbl_greeting_card.setText(f"{summary.greeting}, {summary.display_name}")
 
-        if self._lbl_camera:
-            self._lbl_camera.setText(summary.camera_status)
-            if summary.camera_status == "Ready":
-                self._lbl_camera.parentWidget().setStyleSheet(f"background-color: {c('info_bg')}; border-radius: 8px; border: none;")
-                self._lbl_camera.setStyleSheet(f"color: {c('info')}; background: transparent; border: none;")
-            else:
-                self._lbl_camera.parentWidget().setStyleSheet(f"background-color: {c('error_bg')}; border-radius: 8px; border: none;")
-                self._lbl_camera.setStyleSheet(f"color: {c('error')}; background: transparent; border: none;")
-
-        if self._lbl_privacy:
-            self._lbl_privacy.setText(summary.privacy_mode)
-            
-        if self._lbl_history_log:
-            self._lbl_history_log.setText("Enabled" if summary.history_logging_enabled else "Disabled")
-            if summary.history_logging_enabled:
-                self._lbl_history_log.parentWidget().setStyleSheet(f"background-color: {c('success_bg')}; border-radius: 8px; border: none;")
-                self._lbl_history_log.setStyleSheet(f"color: {c('success')}; background: transparent; border: none;")
-            else:
-                self._lbl_history_log.parentWidget().setStyleSheet(f"background-color: {c('badge_gray_bg')}; border-radius: 8px; border: none;")
-                self._lbl_history_log.setStyleSheet(f"color: {c('badge_gray_fg')}; background: transparent; border: none;")
+        if self._ring_total_sessions:
+            self._ring_total_sessions.set_percentage(summary.total_session_completion)
+        if self._ring_avg_learning:
+            self._ring_avg_learning.set_percentage(summary.average_learning_accuracy)
+        if self._ring_days_learned:
+            self._ring_days_learned.set_percentage(summary.days_learned_pct)
 
     # ── Navigation callbacks ───────────────────────────────
 
@@ -335,7 +398,7 @@ class DashboardPage(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        self._build_topbar(main_layout)
+        self._build_header(main_layout)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -350,8 +413,8 @@ class DashboardPage(QWidget):
         body_layout.setContentsMargins(28, 12, 28, 24)
         body_layout.setSpacing(24)
 
-        self._build_welcome(body_layout)
-        self._build_status(body_layout)
+        self._build_analytics(body_layout)
+        self._build_system_status(body_layout)
         self._build_quizzes(body_layout)
         self._build_how_to_use(body_layout)
         self._build_footer(body_layout)
@@ -359,22 +422,42 @@ class DashboardPage(QWidget):
         body_layout.addStretch()
         main_layout.addWidget(scroll)
 
-    # ── Top Bar ────────────────────────────────────────────
+    # ── Header ─────────────────────────────────────────────
 
-    def _build_topbar(self, parent_layout):
-        topbar = QWidget()
-        topbar.setFixedHeight(60)
-        parent_layout.addWidget(topbar)
+    def _build_header(self, parent_layout):
+        header = QWidget()
+        parent_layout.addWidget(header)
 
-        layout = QHBoxLayout(topbar)
-        layout.setContentsMargins(28, 16, 28, 4)
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(28, 16, 28, 8)
+        layout.setSpacing(24)
         
-        self._lbl_greeting_top = QLabel(f"Loading...")
-        self._lbl_greeting_top.setStyleSheet(f"color: {c('text_primary')}; font-family: 'Segoe UI'; font-size: 22px; font-weight: bold;")
-        layout.addWidget(self._lbl_greeting_top)
+        # 1. Welcome Card
+        card = QFrame()
+        card.setObjectName("welcomeCard")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        card.setStyleSheet(f"""
+            QFrame#welcomeCard {{
+                background-color: #E6D9FA;
+                border-radius: 20px;
+            }}
+            QFrame#welcomeCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
         
-        layout.addStretch()
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(32, 16, 32, 16)
+        
+        self._lbl_greeting_card = QLabel(f"Good Morning, Loading...")
+        self._lbl_greeting_card.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
+        _set_font(self._lbl_greeting_card, size=34) # Increased font size
+        
+        card_layout.addWidget(self._lbl_greeting_card, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(card, stretch=1)
 
+        # 2. Search Box
         self._search_frame = QFrame()
         self._search_frame.setObjectName("searchFrame")
         self._search_frame.setStyleSheet(f"""
@@ -413,9 +496,9 @@ class DashboardPage(QWidget):
         s_layout.addWidget(s_icon)
         s_layout.addWidget(self._search_entry, stretch=1)
         
-        layout.addWidget(self._search_frame)
-        layout.addSpacing(12)
+        layout.addWidget(self._search_frame, 0, Qt.AlignmentFlag.AlignVCenter)
 
+        # 3. Avatar Widget
         self._avatar_widget = QLabel(self._username[0].upper())
         self._avatar_widget.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._avatar_widget.setFixedSize(36, 36)
@@ -431,45 +514,9 @@ class DashboardPage(QWidget):
             }}
         """)
         self._avatar_widget.mousePressEvent = self._show_profile_dropdown
-        layout.addWidget(self._avatar_widget)
+        layout.addWidget(self._avatar_widget, 0, Qt.AlignmentFlag.AlignVCenter)
 
-    # ── Welcome Banner ─────────────────────────────────────
-
-    def _build_welcome(self, parent_layout):
-        wrapper = QWidget()
-        wrapper.setStyleSheet("background: transparent;")
-        wrapper_layout = QVBoxLayout(wrapper)
-        wrapper_layout.setContentsMargins(6, 6, 6, 8)
-        wrapper_layout.setSpacing(0)
-
-        card = QFrame()
-        card.setObjectName("welcomeCard")
-        card.setStyleSheet(f"""
-            QFrame#welcomeCard {{
-                background-color: {c('info_bg')};
-                border: 1px solid #D1C4E9;
-                border-radius: 14px;
-            }}
-            QFrame#welcomeCard QLabel {{
-                background: transparent;
-                border: none;
-            }}
-        """)
-        
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(24, 18, 24, 18)
-        
-        self._lbl_greeting_card = QLabel(f"Loading...")
-        self._lbl_greeting_card.setStyleSheet("color: #311B92; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
-        
-        layout.addWidget(self._lbl_greeting_card)
-
-        _add_shadow(card)
-        wrapper_layout.addWidget(card)
-        parent_layout.addWidget(wrapper)
-
-
-    def _build_status(self, parent_layout):
+    def _build_system_status(self, parent_layout):
         self._lbl_system_status_heading = QLabel("System Status")
         self._lbl_system_status_heading.setStyleSheet(f"color: {c('text_primary')}; background: transparent;")
         _set_font(self._lbl_system_status_heading, size=13, bold=True)
@@ -485,61 +532,86 @@ class DashboardPage(QWidget):
         row.setStyleSheet("background: transparent;")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
+        layout.setSpacing(16)
 
-        self._lbl_camera = QLabel("Loading...")
-        self._lbl_privacy = QLabel("Loading...")
-        self._lbl_history_log = QLabel("Loading...")
-
-        status_items = [
-            ("Camera",       self._lbl_camera,      c('info_bg'),       c('info')),
-            ("Privacy Mode", self._lbl_privacy,     "#E8F5E9",          "#2E7D32"),
-            ("History Log",  self._lbl_history_log, c('badge_gray_bg'), c('badge_gray_fg')),
+        statuses = [
+            ("Camera", "Ready", "#673AB7", "#EDE7F6"),
+            ("Privacy Mode", "Local Only", "#2E7D32", "#E8F5E9"),
+            ("History Log", "Enabled", "#00838F", "#E0F7FA")
         ]
 
-        for title, val_lbl, bg, fg in status_items:
+        for title, status, text_color, bg_color in statuses:
             card = QFrame()
             card.setObjectName("statusCard")
-            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             card.setStyleSheet(f"""
                 QFrame#statusCard {{
                     background-color: {c('bg_primary')};
                     border: 1px solid {c('border')};
                     border-radius: 12px;
                 }}
-                QFrame#statusCard QLabel {{
-                    background: transparent;
-                    border: none;
+            """)
+            card.setFixedHeight(80)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            
+            c_layout = QVBoxLayout(card)
+            c_layout.setContentsMargins(16, 12, 16, 12)
+            c_layout.setSpacing(8)
+            
+            t_lbl = QLabel(title)
+            t_lbl.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; border: none;")
+            _set_font(t_lbl, size=11)
+            
+            # Create a horizontal layout for the badge to align it to the left
+            badge_layout = QHBoxLayout()
+            badge_layout.setContentsMargins(0, 0, 0, 0)
+            badge_layout.setSpacing(0)
+            
+            badge = QLabel(status)
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Use padding instead of fixed size to adapt to text length
+            badge.setStyleSheet(f"""
+                QLabel {{
+                    color: {text_color};
+                    background-color: {bg_color};
+                    border-radius: 6px;
+                    font-weight: bold;
+                    font-size: 11px;
+                    padding: 4px 10px;
                 }}
             """)
-            c_layout = QVBoxLayout(card)
-            c_layout.setContentsMargins(20, 16, 20, 16)
-            c_layout.setSpacing(6)
-
-            t_lbl = QLabel(title)
-            t_lbl.setStyleSheet(f"color: {c('text_primary')};")
-            _set_font(t_lbl, size=11)
-
-            badge_container = QWidget()
-            badge_container.setFixedHeight(28)
-            badge_container.setStyleSheet(f"""
-                background-color: {bg};
-                border-radius: 8px;
-                border: none;
-            """)
-            badge_layout = QHBoxLayout(badge_container)
-            badge_layout.setContentsMargins(14, 0, 14, 0)
-
-            val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            val_lbl.setStyleSheet(f"color: {fg}; background: transparent; border: none;")
-            _set_font(val_lbl, size=11, bold=True)
-            badge_layout.addWidget(val_lbl)
-
+            badge_layout.addWidget(badge)
+            badge_layout.addStretch()
+            
             c_layout.addWidget(t_lbl)
-            c_layout.addWidget(badge_container, 0, Qt.AlignmentFlag.AlignLeft)
-
+            c_layout.addLayout(badge_layout)
+            c_layout.addStretch()
+            
             _add_shadow(card)
-            layout.addWidget(card, stretch=1)
+            layout.addWidget(card)
+
+        wrapper_layout.addWidget(row)
+        parent_layout.addWidget(wrapper)
+
+    def _build_analytics(self, parent_layout):
+        wrapper = QWidget()
+        wrapper.setStyleSheet("background: transparent;")
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(6, 6, 6, 8)
+        wrapper_layout.setSpacing(0)
+
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(24)
+
+        self._ring_total_sessions = AnalyticsRingCard("Total Session")
+        self._ring_avg_learning = AnalyticsRingCard("Average Learning")
+        self._ring_days_learned = AnalyticsRingCard("Days Learned")
+
+        layout.addWidget(self._ring_total_sessions)
+        layout.addWidget(self._ring_avg_learning)
+        layout.addWidget(self._ring_days_learned)
 
         wrapper_layout.addWidget(row)
         parent_layout.addWidget(wrapper)
@@ -654,8 +726,8 @@ class DashboardPage(QWidget):
         if hasattr(self, '_main_content_widget') and self._main_content_widget:
             self._main_content_widget.setStyleSheet(f"background-color: {c('bg_secondary')};")
         
-        if hasattr(self, '_lbl_greeting_top') and self._lbl_greeting_top:
-            self._lbl_greeting_top.setStyleSheet(f"color: {c('text_primary')}; font-family: 'Segoe UI'; font-size: 22px; font-weight: bold;")
+        if hasattr(self, '_lbl_greeting_card') and self._lbl_greeting_card:
+            self._lbl_greeting_card.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
         if hasattr(self, '_search_frame') and self._search_frame:
             self._search_frame.setStyleSheet(f"""
                 QFrame#searchFrame {{
@@ -693,9 +765,8 @@ class DashboardPage(QWidget):
         for card in self.findChildren(QFrame, "welcomeCard"):
             card.setStyleSheet(f"""
                 QFrame#welcomeCard {{
-                    background-color: {c('info_bg')};
-                    border: 1px solid #D1C4E9;
-                    border-radius: 14px;
+                    background-color: #E6D9FA;
+                    border-radius: 20px;
                 }}
                 QFrame#welcomeCard QLabel {{
                     background: transparent;
@@ -747,10 +818,8 @@ class DashboardPage(QWidget):
         if hasattr(self, '_lbl_footer') and self._lbl_footer:
             self._lbl_footer.setStyleSheet(f"color: {c('text_muted')}; background: transparent;")
             
-        for card in self.findChildren(QFrame, "statCard") + self.findChildren(QFrame, "statusCard"):
             for lbl in card.findChildren(QLabel):
-                if lbl not in [self._lbl_camera, self._lbl_privacy, self._lbl_history_log]:
-                    lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
+                lbl.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
                     
         for card in self.findChildren(QFrame, "quizCard"):
             for lbl in card.findChildren(QLabel):

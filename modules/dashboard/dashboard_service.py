@@ -10,7 +10,7 @@ from typing import Optional
 
 from core.config import config
 from core.audit_log import get_events_for_user
-from modules.gesture_history.backend import get_history
+from modules.gesture_history.backend import get_quiz_results, get_history
 from modules.settings.account_backend import get_user_by_username
 
 
@@ -29,6 +29,13 @@ class DashboardSummary:
     role: str
     greeting: str
     last_login: Optional[datetime]
+    
+    # New Analytics Metrics
+    total_session_completion: float
+    average_learning_accuracy: float
+    days_learned_pct: float
+    
+    # Legacy fields (kept for compatibility if needed elsewhere, though UI will replace them)
     sessions_today: int
     avg_confidence: float
     unique_signs_recognized: int
@@ -36,7 +43,6 @@ class DashboardSummary:
     privacy_mode: str
     history_logging_enabled: bool
     recent_activity: list[RecentActivity]
-    # True when history logging is off so the UI can show the right hint
     history_logging_off: bool = False
 
 
@@ -112,19 +118,12 @@ def get_dashboard_summary(username: str) -> Optional[DashboardSummary]:
             
     print(f"[DEBUG] get_dashboard_summary called for username='{username}' (user_id={user_id})")
     
-    # 2. History Analytics
+    # 2. History Analytics (Legacy)
     history = get_history(user_id)
-    print(f"[DEBUG] get_history({user_id}) returned {len(history)} rows.")
-    if history:
-        print(f"[DEBUG] First row: {history[0]}")
-
-    # Check whether history logging is currently enabled
     from modules.gesture_history.backend import get_setting as _get_hist_setting
     history_logging_off = (_get_hist_setting("logging_enabled") != "1")
 
     # ── Sessions Today: count from audit log login events ──────────────────
-    # This works regardless of whether gesture history logging is on, because
-    # login events are always recorded in the audit log.
     sessions_today = 0
     today_date = datetime.now().date()
     for e in events:
@@ -136,7 +135,7 @@ def get_dashboard_summary(username: str) -> Optional[DashboardSummary]:
             except (ValueError, KeyError):
                 pass
 
-    # ── Signs / Confidence: from gesture history (requires logging enabled) ─
+    # ── Legacy Signs / Confidence ───────────────────────────────────────────
     unique_signs: set[str] = set()
     total_confidence = 0.0
     count_confidence = 0
@@ -166,11 +165,44 @@ def get_dashboard_summary(username: str) -> Optional[DashboardSummary]:
                 timestamp=dt,
             ))
 
-    print(f"[DEBUG] Final sessions_today={sessions_today}, recent_activity len={len(recent_activity)}")
-
     avg_confidence = (total_confidence / count_confidence * 100) if count_confidence > 0 else 0.0
     
-    # 3. System Status
+    # 3. New Analytics (Quiz Results)
+    quiz_results = get_quiz_results(username)
+    
+    total_attempts = len(quiz_results)
+    completed_attempts = 0
+    correct_answers = 0
+    unique_days = set()
+    
+    for row in quiz_results:
+        res = row.get("result", "")
+        if res != "skipped":
+            completed_attempts += 1
+            if res == "correct":
+                correct_answers += 1
+                
+        # Parse date for Days Learned
+        logged_at = row.get("logged_at", "")
+        if len(logged_at) >= 10:
+            unique_days.add(logged_at[:10])  # YYYY-MM-DD
+            
+    # Calculate Total Session Completion
+    total_session_completion = (completed_attempts / total_attempts * 100.0) if total_attempts > 0 else 0.0
+    
+    # Calculate Average Learning Accuracy
+    average_learning_accuracy = (correct_answers / completed_attempts * 100.0) if completed_attempts > 0 else 0.0
+    
+    # Calculate Days Learned (unique days this month / days elapsed this month)
+    # We'll just count total unique days in DB over a 30 day target, or just the current month's days.
+    # The requirement is "Days active this month / days elapsed this month".
+    # Let's count unique days matching this month.
+    current_month_prefix = datetime.now().strftime("%Y-%m")
+    days_this_month = sum(1 for d in unique_days if d.startswith(current_month_prefix))
+    days_elapsed = datetime.now().day
+    days_learned_pct = (days_this_month / days_elapsed * 100.0) if days_elapsed > 0 else 0.0
+    
+    # System Status
     cam_status = get_camera_status()
     privacy_mode = "Local Only" if config.get("privacy.local_only_processing", True) else "Cloud Enabled"
     history_log_enabled = config.get("privacy.gesture_history_log", False)
@@ -181,6 +213,9 @@ def get_dashboard_summary(username: str) -> Optional[DashboardSummary]:
         role=role,
         greeting=greeting,
         last_login=last_login_dt,
+        total_session_completion=total_session_completion,
+        average_learning_accuracy=average_learning_accuracy,
+        days_learned_pct=days_learned_pct,
         sessions_today=sessions_today,
         avg_confidence=avg_confidence,
         unique_signs_recognized=len(unique_signs),
