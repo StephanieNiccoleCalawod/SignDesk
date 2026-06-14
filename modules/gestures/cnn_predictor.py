@@ -1,9 +1,10 @@
-
-
 import os
 import json
+import logging
 import numpy as np
 from tensorflow.keras.models import load_model
+
+logger = logging.getLogger(__name__)
 
 
 class CNNPredictor:
@@ -33,17 +34,17 @@ class CNNPredictor:
 
         # Try landmark model first (much more accurate)
         if os.path.exists(self.LANDMARK_MODEL_PATH):
-            print("[CNNPredictor] Loading landmark model...")
+            logger.info("[CNNPredictor] Loading landmark model...")
             self._model = load_model(self.LANDMARK_MODEL_PATH)
             labels_path = self.LANDMARK_LABELS_PATH
             self._use_landmarks = True
-            print("[CNNPredictor] Using LANDMARK mode (direct coordinates)")
+            logger.info("[CNNPredictor] Using LANDMARK mode (direct coordinates)")
 
         elif os.path.exists(self.CNN_MODEL_PATH):
-            print("[CNNPredictor] Landmark model not found, falling back to CNN...")
+            logger.info("[CNNPredictor] Landmark model not found, falling back to CNN...")
             self._model = load_model(self.CNN_MODEL_PATH)
             labels_path = self.CNN_LABELS_PATH
-            print("[CNNPredictor] Using CNN mode (skeleton image)")
+            logger.info("[CNNPredictor] Using CNN mode (skeleton image)")
 
         else:
             raise FileNotFoundError(
@@ -57,7 +58,7 @@ class CNNPredictor:
 
         # Reverse: {0: 'A', 1: 'B', ...}
         self._labels = {v: k for k, v in label_map.items()}
-        print(f"[CNNPredictor] Recognizes {len(self._labels)} gestures.")
+        logger.info("[CNNPredictor] Recognizes %d gestures.", len(self._labels))
 
     # ── Main prediction entry point ───────────────────────────────────────────
 
@@ -95,7 +96,7 @@ class CNNPredictor:
         confidence = float(predictions[top_idx])
         gesture = self._labels[top_idx]
 
-        print(f"[CNN] Top: {gesture} | Confidence: {confidence:.3f}")
+        logger.debug("[CNN] Top: %s | Confidence: %.3f", gesture, confidence)
         return gesture, confidence
         
     @staticmethod
@@ -128,7 +129,7 @@ class CNNPredictor:
             return coords.flatten()
 
         except Exception as e:
-            print(f"[CNNPredictor] Normalization error: {e}")
+            logger.warning("[CNNPredictor] Normalization error: %s", e)
             return None
 
     # ── CNN fallback (skeleton image) ─────────────────────────────────────────
@@ -187,7 +188,7 @@ class CNNPredictor:
             return gesture, confidence
 
         except Exception as e:
-            print(f"[CNNPredictor] CNN fallback error: {e}")
+            logger.warning("[CNNPredictor] CNN fallback error: %s", e)
             return None, 0.0
 
     # ── Properties ────────────────────────────────────────────────────────────

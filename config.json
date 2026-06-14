@@ -5,7 +5,7 @@
     "gesture.confidence_threshold": 60,
     "gesture.timeout": 2.0,
     "gesture.show_confidence_indicator": true,
-    "speech.tts_enabled": true,
+    "speech.tts_enabled": false,
     "speech.voice": "male",
     "speech.rate": 1.0,
     "speech.volume": 100,

@@ -438,8 +438,9 @@ class DashboardPage(QWidget):
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         card.setStyleSheet(f"""
             QFrame#welcomeCard {{
-                background-color: #E6D9FA;
-                border-radius: 20px;
+                background-color: {c('info_bg')};
+                border: 1px solid #D1C4E9;
+                border-radius: 14px;
             }}
             QFrame#welcomeCard QLabel {{
                 background: transparent;
@@ -448,11 +449,10 @@ class DashboardPage(QWidget):
         """)
         
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(32, 16, 32, 16)
+        card_layout.setContentsMargins(24, 18, 24, 18)
         
-        self._lbl_greeting_card = QLabel(f"Good Morning, Loading...")
-        self._lbl_greeting_card.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
-        _set_font(self._lbl_greeting_card, size=34) # Increased font size
+        self._lbl_greeting_card = QLabel(f"Loading...")
+        self._lbl_greeting_card.setStyleSheet("color: #311B92; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
         
         card_layout.addWidget(self._lbl_greeting_card, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(card, stretch=1)
@@ -726,8 +726,6 @@ class DashboardPage(QWidget):
         if hasattr(self, '_main_content_widget') and self._main_content_widget:
             self._main_content_widget.setStyleSheet(f"background-color: {c('bg_secondary')};")
         
-        if hasattr(self, '_lbl_greeting_card') and self._lbl_greeting_card:
-            self._lbl_greeting_card.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
         if hasattr(self, '_search_frame') and self._search_frame:
             self._search_frame.setStyleSheet(f"""
                 QFrame#searchFrame {{
@@ -765,8 +763,9 @@ class DashboardPage(QWidget):
         for card in self.findChildren(QFrame, "welcomeCard"):
             card.setStyleSheet(f"""
                 QFrame#welcomeCard {{
-                    background-color: #E6D9FA;
-                    border-radius: 20px;
+                    background-color: {c('info_bg')};
+                    border: 1px solid #D1C4E9;
+                    border-radius: 14px;
                 }}
                 QFrame#welcomeCard QLabel {{
                     background: transparent;

@@ -29,6 +29,7 @@ class CameraFeedWidget(QWidget):
     def set_frame(self, frame):
         """Convert cv2 BGR frame to QPixmap and display."""
         if frame is None:
+            self.clear()
             return
             
         self._current_frame = frame

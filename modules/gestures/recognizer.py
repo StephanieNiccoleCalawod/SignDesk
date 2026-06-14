@@ -1,6 +1,9 @@
 import time
+import logging
 from modules.gestures.comparator import LandmarkComparator
 from modules.gestures.confidence import ConfidenceFilter, StabilityBuffer
+
+logger = logging.getLogger(__name__)
 
 
 class GestureRecognizer:
@@ -54,6 +57,11 @@ class GestureRecognizer:
         """
         # Stage 1 — Compare landmarks against gesture library
         raw_gesture, raw_score = self._comparator.best_match(landmarks)
+
+        # Cache raw CNN result immediately — the UI reads this via
+        # last_raw_result to avoid a second model.predict() call per frame.
+        self._last_gesture    = raw_gesture
+        self._last_confidence = raw_score
 
         # ── Motion detection filter (distinguish I/J and D/Z) ──
         if raw_gesture in ["I", "J", "D", "Z"] and landmarks and len(landmarks) == 21:
@@ -139,15 +147,15 @@ class GestureRecognizer:
             self._hold_confirmed = False
 
             if prev and gesture:
-                print(
-                    f"[HoldTimer] Gesture changed: "
-                    f"'{prev}' → '{gesture}' | Timer reset"
+                logger.debug(
+                    "[HoldTimer] Gesture changed: '%s' → '%s' | Timer reset",
+                    prev, gesture,
                 )
             elif prev:
-                print(f"[HoldTimer] Gesture lost: '{prev}' | Timer reset")
+                logger.debug("[HoldTimer] Gesture lost: '%s' | Timer reset", prev)
             elif gesture:
                 # Only logs real gesture names now — never logs 'None'
-                print(f"[HoldTimer] New gesture: '{gesture}' | Timer started")
+                logger.debug("[HoldTimer] New gesture: '%s' | Timer started", gesture)
 
             return None
 
@@ -157,10 +165,9 @@ class GestureRecognizer:
 
         # Still holding — not ready yet
         if elapsed < self._hold_seconds:
-            print(
-                f"[HoldTimer] Holding '{gesture}' | "
-                f"{elapsed:.1f}s / {self._hold_seconds}s "
-                f"({remaining:.1f}s remaining)"
+            logger.debug(
+                "[HoldTimer] Holding '%s' | %.1fs / %.1fs (%.1fs remaining)",
+                gesture, elapsed, self._hold_seconds, remaining,
             )
             return None
 
@@ -168,9 +175,9 @@ class GestureRecognizer:
         if not self._hold_confirmed:
             self._hold_confirmed = True
             self._last_committed = gesture
-            print(
-                f"[HoldTimer] ✅ '{gesture}' confirmed after "
-                f"{elapsed:.1f}s → committing to assembler"
+            logger.debug(
+                "[HoldTimer] '%s' confirmed after %.1fs → committing to assembler",
+                gesture, elapsed,
             )
             return gesture, score
 
@@ -189,7 +196,7 @@ class GestureRecognizer:
         self._hold_gesture   = None
         self._hold_start     = None
         self._hold_confirmed = False
-        print(f"[HoldTimer] Reset after commit: '{prev}'")
+        logger.debug("[HoldTimer] Reset after commit: '%s'", prev)
 
     # ── Public: hold progress for UI progress bar ─────────────────────────────
 
@@ -244,6 +251,16 @@ class GestureRecognizer:
     @property
     def last_confidence(self) -> float:
         return self._last_confidence
+
+    @property
+    def last_raw_result(self) -> tuple[str | None, float]:
+        """
+        Returns the most recent raw (pre-hold) comparator result as
+        (gesture_name, confidence).  Use this instead of calling
+        _comparator.best_match() again so the CNN model is only invoked
+        once per frame inside recognize().
+        """
+        return self._last_gesture, self._last_confidence
 
     @property
     def available_gestures(self) -> list[str]:

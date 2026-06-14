@@ -66,11 +66,73 @@ class CameraPracticePage(BasePage):
         
     def activate(self):
         super().activate()
-        # Restore session state if needed, or prompt to start
+        # Reset the page to a clean initial state every time user enters
+        self._reset_ui_to_initial_state()
         
     def deactivate(self):
         super().deactivate()
+        # Stop camera, timer, and all detection
         self.viewmodel.stop()
+        
+        # Process any pending Qt events/signals from the pipeline to prevent
+        # queued frame_ready / status_updated signals from firing after we hide
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        
+        # Clear the camera feed display
+        if hasattr(self, 'camera_feed'):
+            self.camera_feed.clear()
+        
+        # Reset the UI back to initial state
+        self._reset_ui_to_initial_state()
+    
+    def _reset_ui_to_initial_state(self):
+        """Reset all UI elements to their initial/idle state."""
+        # Reset score display
+        if hasattr(self, 'stat_correct'):
+            self.stat_correct.set_value("0")
+        if hasattr(self, 'stat_missed'):
+            self.stat_missed.set_value("0")
+        if hasattr(self, 'stat_acc'):
+            self.stat_acc.set_value("0%")
+        if hasattr(self, 'score_pill'):
+            self.score_pill.setText("0 correct")
+        
+        # Reset confidence indicators
+        if hasattr(self, 'status_widget'):
+            self.status_widget.status_pill.set_state("idle", "Ready")
+            self.status_widget.current_conf.set_value(0)
+            self.status_widget.hold_conf.set_value(0)
+        
+        # Reset progress
+        if hasattr(self, 'prog_lbl'):
+            self.prog_lbl.setText("Letter 1 of 5")
+        if hasattr(self, 'prog_bar'):
+            self.prog_bar.setValue(0)
+        
+        # Reset feedback box
+        if hasattr(self, 'fb_title'):
+            self.fb_title.setText("Ready")
+        if hasattr(self, 'fb_sub'):
+            self.fb_sub.setText("Press start")
+            self.fb_sub.setStyleSheet(f"color: {c('success')}; font-size: 10px;")
+        if hasattr(self, 'fb_icon'):
+            self.fb_icon.setText("✓")
+            self.fb_icon.setStyleSheet(f"background-color: {c('success')}; color: #FFFFFF; border-radius: 12px; font-weight: bold;")
+        if hasattr(self, 'fb_box'):
+            self.fb_box.show()
+        
+        # Reset FPS badge
+        if hasattr(self, 'fps_badge'):
+            self.fps_badge.set_fps(0)
+        
+        # Reset landmark overlay
+        if hasattr(self, 'landmark_overlay'):
+            self.landmark_overlay.set_detected(False)
+        
+        # Ensure live feed panel is visible (not the placeholder)
+        if hasattr(self, 'feed_stack'):
+            self.feed_stack.setCurrentIndex(0)
         
     def _on_set_changed(self):
         if not hasattr(self, 'set_selector'):
@@ -722,16 +784,17 @@ class CameraPracticePage(BasePage):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
+            # Capture scores before stop() resets them
+            correct = self.viewmodel.correct_count
+            missed = self.viewmodel.missed_count
+            letter_results = list(self.viewmodel._letter_results)
+            
             self.viewmodel.stop()
-            total = self.viewmodel.correct_count + self.viewmodel.missed_count
+            
+            total = correct + missed
             if total > 0:
-                acc = int((self.viewmodel.correct_count / total * 100))
-                self._show_completion_dialog(
-                    self.viewmodel.correct_count,
-                    self.viewmodel.missed_count,
-                    acc,
-                    list(self.viewmodel._letter_results)
-                )
+                acc = int((correct / total * 100))
+                self._show_completion_dialog(correct, missed, acc, letter_results)
             else:
                 self.app.show_dashboard(self.username)
 

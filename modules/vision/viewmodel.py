@@ -120,6 +120,14 @@ class CameraPracticeViewModel(QObject):
         self.feedback_updated.emit("", "", "")
         self.frame_ready.emit(None)
         
+        # Reset session counters so a fresh start begins at zero
+        self.current_target_idx = 0
+        self.correct_count = 0
+        self.missed_count = 0
+        self.is_waiting_next = False
+        self._last_announced_letter = None
+        self._letter_results = []
+        
     def _process_frame(self):
         if not self.is_running:
             return
@@ -148,10 +156,9 @@ class CameraPracticeViewModel(QObject):
             target = self.target_letters[self.current_target_idx]
 
             # Always show hold progress; show current confidence from the raw
-            # hold_progress so the bar is never stuck at 0 while hand is visible.
-            # We derive "current" confidence from the comparator directly via a
-            # separate peek so the bar reflects real-time CNN output.
-            raw_gesture, raw_conf = self.recognizer._comparator.best_match(landmarks)
+            # CNN result cached inside recognize() — avoids a second
+            # model.predict() call per frame (Fix #1: eliminate duplicate inference).
+            raw_gesture, raw_conf = self.recognizer.last_raw_result
             current_pct = int(raw_conf * 100)
 
             self.confidence_updated.emit(current_pct, hold_pct)
@@ -253,13 +260,18 @@ class CameraPracticeViewModel(QObject):
         else:
             # Session complete — flush any remaining letters to speech
             word_assembler.force_flush()
+            
+            # Capture final stats before stop() resets them
+            final_correct = self.correct_count
+            final_missed = self.missed_count
+            final_results = list(self._letter_results)
+            total = final_correct + final_missed
+            acc = int((final_correct / total * 100)) if total > 0 else 0
+            
             self.stop()
             
-            # Calculate final stats and emit complete signal
-            total = self.correct_count + self.missed_count
-            acc = int((self.correct_count / total * 100)) if total > 0 else 0
-            self.session_completed.emit(self.correct_count, self.missed_count, acc, list(self._letter_results))
-            
+            # Emit completion signal with saved stats
+            self.session_completed.emit(final_correct, final_missed, acc, final_results)
             self.status_updated.emit("success", "Session Complete")
             
     def _announce_target_letter(self, letter: str) -> None:
