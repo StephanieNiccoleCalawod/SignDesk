@@ -3,7 +3,7 @@
 import os
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
-    QScrollArea, QPushButton, QMessageBox
+    QScrollArea, QPushButton, QMessageBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QCursor, QPainter, QLinearGradient, QColor
@@ -40,15 +40,33 @@ class GestureHistoryPage(QWidget):
 
         # Top bar
         self.topbar = QWidget()
-        self.topbar.setFixedHeight(60)
         tb_layout = QHBoxLayout(self.topbar)
-        tb_layout.setContentsMargins(28, 16, 28, 4)
+        tb_layout.setContentsMargins(28, 16, 28, 8)
+        tb_layout.setSpacing(24)
+
+        card = QFrame()
+        card.setObjectName("welcomeCard")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        card.setStyleSheet(f"""
+            QFrame#welcomeCard {{
+                background-color: {c('info_bg')};
+                border: 1px solid {c('welcome_border')};
+                border-radius: 14px;
+            }}
+            QFrame#welcomeCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(24, 18, 24, 18)
 
         self.greeting = QLabel("Gesture History")
-        self.greeting.setStyleSheet(f"color: {c('text_primary')};")
-        _set_font(self.greeting, size=16, bold=True)
-        tb_layout.addWidget(self.greeting)
-        tb_layout.addStretch()
+        self.greeting.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+        card_layout.addWidget(self.greeting, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        
+        tb_layout.addWidget(card, stretch=1)
 
         # Avatar circle
         self.avatar = QLabel(self._username[0].upper())
@@ -64,7 +82,7 @@ class GestureHistoryPage(QWidget):
                 font-weight: bold;
             }}
         """)
-        tb_layout.addWidget(self.avatar)
+        tb_layout.addWidget(self.avatar, 0, Qt.AlignmentFlag.AlignVCenter)
 
         main_layout.addWidget(self.topbar)
 
@@ -107,9 +125,21 @@ class GestureHistoryPage(QWidget):
     def _update_styles(self):
         self.setStyleSheet(f"background-color: {c('bg_secondary')};")
         if hasattr(self, 'topbar') and self.topbar:
-            self.topbar.setStyleSheet(f"background-color: {c('bg_primary')}; border-bottom: 1px solid {c('border')};")
+            self.topbar.setStyleSheet("background: transparent; border: none;")
         if hasattr(self, 'greeting') and self.greeting:
-            self.greeting.setStyleSheet(f"color: {c('text_primary')};")
+            self.greeting.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+            for welcome_card in self.findChildren(QFrame, "welcomeCard"):
+                welcome_card.setStyleSheet(f"""
+                    QFrame#welcomeCard {{
+                        background-color: {c('info_bg')};
+                        border: 1px solid {c('welcome_border')};
+                        border-radius: 14px;
+                    }}
+                    QFrame#welcomeCard QLabel {{
+                        background: transparent;
+                        border: none;
+                    }}
+                """)
         if hasattr(self, 'avatar') and self.avatar:
             self.avatar.setStyleSheet(f"""
                 QLabel {{

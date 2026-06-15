@@ -1,7 +1,7 @@
 
 
 import os
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QGridLayout, QFrame, QMessageBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QGridLayout, QFrame, QMessageBox, QSizePolicy
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QCursor
 
@@ -43,19 +43,38 @@ class ReferencePage(QWidget):
 
         # Top Bar: Heading & User profile avatar
         topbar = QWidget()
-        topbar.setFixedHeight(60)
         tb_layout = QHBoxLayout(topbar)
-        tb_layout.setContentsMargins(28, 16, 28, 4)
+        tb_layout.setContentsMargins(28, 16, 28, 8)
+        tb_layout.setSpacing(24)
 
+        card = QFrame()
+        card.setObjectName("welcomeCard")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        card.setStyleSheet(f"""
+            QFrame#welcomeCard {{
+                background-color: {c('info_bg')};
+                border: 1px solid {c('welcome_border')};
+                border-radius: 14px;
+            }}
+            QFrame#welcomeCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(24, 18, 24, 18)
+        
         self.greeting = QLabel("ASL Alphabet Reference")
-        _set_font(self.greeting, size=16, bold=True)
-        tb_layout.addWidget(self.greeting)
-        tb_layout.addStretch()
+        self.greeting.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+        
+        card_layout.addWidget(self.greeting, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        tb_layout.addWidget(card, stretch=1)
 
         self.avatar = QLabel(self._username[0].upper() if self._username else "?")
         self.avatar.setFixedSize(36, 36)
         self.avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tb_layout.addWidget(self.avatar)
+        tb_layout.addWidget(self.avatar, 0, Qt.AlignmentFlag.AlignVCenter)
         
         layout.addWidget(topbar)
 
@@ -120,7 +139,19 @@ class ReferencePage(QWidget):
 
     def _update_styles(self):
         self.setStyleSheet(f"QWidget#referencePage {{ background-color: {c('bg_secondary')}; }}")
-        self.greeting.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
+        self.greeting.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+        for welcome_card in self.findChildren(QFrame, "welcomeCard"):
+            welcome_card.setStyleSheet(f"""
+                QFrame#welcomeCard {{
+                    background-color: {c('info_bg')};
+                    border: 1px solid {c('welcome_border')};
+                    border-radius: 14px;
+                }}
+                QFrame#welcomeCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
         self.avatar.setStyleSheet(f"""
             QLabel {{
                 background-color: {c('accent')};

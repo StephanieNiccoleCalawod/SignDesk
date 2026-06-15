@@ -282,20 +282,39 @@ class FlashcardQuizPage(QWidget):
 
         # Top Bar
         topbar = QWidget()
-        topbar.setFixedHeight(60)
         tb_layout = QHBoxLayout(topbar)
-        tb_layout.setContentsMargins(28, 16, 28, 4)
+        tb_layout.setContentsMargins(28, 16, 28, 8)
+        tb_layout.setSpacing(24)
+
+        card = QFrame()
+        card.setObjectName("welcomeCard")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        card.setStyleSheet(f"""
+            QFrame#welcomeCard {{
+                background-color: {c('info_bg')};
+                border: 1px solid {c('welcome_border')};
+                border-radius: 14px;
+            }}
+            QFrame#welcomeCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(24, 18, 24, 18)
 
         self.title_lbl = QLabel("Flashcard Recognition Quiz")
-        _set_font(self.title_lbl, size=16, bold=True)
-        tb_layout.addWidget(self.title_lbl)
-        tb_layout.addStretch()
+        self.title_lbl.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+        card_layout.addWidget(self.title_lbl, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        
+        tb_layout.addWidget(card, stretch=1)
 
         # Avatar
         self.avatar = QLabel(self._username[0].upper() if self._username else "?")
         self.avatar.setFixedSize(36, 36)
         self.avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tb_layout.addWidget(self.avatar)
+        tb_layout.addWidget(self.avatar, 0, Qt.AlignmentFlag.AlignVCenter)
 
         layout.addWidget(topbar)
 
@@ -1459,7 +1478,20 @@ class FlashcardQuizPage(QWidget):
     def _update_styles(self):
         # Apply stylesheet to main widgets
         self.setStyleSheet(f"QWidget#flashcardQuizPage {{ background-color: {c('bg_secondary')}; }}")
-        self.title_lbl.setStyleSheet(f"color: {c('text_primary')}; border: none; background: transparent;")
+        self.title_lbl.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+
+        for welcome_card in self.findChildren(QFrame, "welcomeCard"):
+            welcome_card.setStyleSheet(f"""
+                QFrame#welcomeCard {{
+                    background-color: {c('info_bg')};
+                    border: 1px solid {c('welcome_border')};
+                    border-radius: 14px;
+                }}
+                QFrame#welcomeCard QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
 
         self.avatar.setStyleSheet(f"""
             QLabel {{

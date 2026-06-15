@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QGridLayout, QComboBox, QDialog, QMessageBox, QScrollArea, QStackedWidget
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QGridLayout, QComboBox, QDialog, QMessageBox, QScrollArea, QStackedWidget, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QCursor, QPixmap
@@ -177,16 +177,35 @@ class CameraPracticePage(BasePage):
         
     def _build_topbar(self):
         self.topbar = QWidget()
-        self.topbar.setFixedHeight(52)
-        self.topbar.setStyleSheet(f"background-color: {c('bg_primary')}; border-bottom: 1px solid {c('border')};")
+        self.topbar.setStyleSheet("background: transparent; border: none;")
         
         layout = QHBoxLayout(self.topbar)
-        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setContentsMargins(28, 16, 28, 8)
+        layout.setSpacing(24)
         
+        card = QFrame()
+        card.setObjectName("welcomeCard")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        card.setStyleSheet(f"""
+            QFrame#welcomeCard {{
+                background-color: {c('info_bg')};
+                border: 1px solid {c('welcome_border')};
+                border-radius: 14px;
+            }}
+            QFrame#welcomeCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(24, 18, 24, 18)
+
         self.topbar_title = QLabel("Camera Practice")
-        self.topbar_title.setStyleSheet(f"color: {c('text_primary')}; font-size: {SIZE_LG}px; font-weight: bold; border: none;")
+        self.topbar_title.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
         
-        layout.addWidget(self.topbar_title)
+        card_layout.addWidget(self.topbar_title, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(card, stretch=1)
         
         self.set_selector = QComboBox()
         self.set_selector.setStyleSheet(f"""
@@ -804,9 +823,21 @@ class CameraPracticePage(BasePage):
     def _update_styles(self):
         # Update Topbar
         if hasattr(self, 'topbar') and self.topbar:
-            self.topbar.setStyleSheet(f"background-color: {c('bg_primary')}; border-bottom: 1px solid {c('border')};")
+            self.topbar.setStyleSheet("background: transparent; border: none;")
         if hasattr(self, 'topbar_title') and self.topbar_title:
-            self.topbar_title.setStyleSheet(f"color: {c('text_primary')}; font-size: {SIZE_LG}px; font-weight: bold; border: none;")
+            self.topbar_title.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+            for welcome_card in self.findChildren(QFrame, "welcomeCard"):
+                welcome_card.setStyleSheet(f"""
+                    QFrame#welcomeCard {{
+                        background-color: {c('info_bg')};
+                        border: 1px solid {c('welcome_border')};
+                        border-radius: 14px;
+                    }}
+                    QFrame#welcomeCard QLabel {{
+                        background: transparent;
+                        border: none;
+                    }}
+                """)
         if hasattr(self, 'set_selector') and self.set_selector:
             self.set_selector.setStyleSheet(f"""
                 QComboBox {{

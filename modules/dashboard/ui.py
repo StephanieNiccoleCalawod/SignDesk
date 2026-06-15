@@ -439,7 +439,7 @@ class DashboardPage(QWidget):
         card.setStyleSheet(f"""
             QFrame#welcomeCard {{
                 background-color: {c('info_bg')};
-                border: 1px solid #D1C4E9;
+                border: 1px solid {c('welcome_border')};
                 border-radius: 14px;
             }}
             QFrame#welcomeCard QLabel {{
@@ -452,7 +452,7 @@ class DashboardPage(QWidget):
         card_layout.setContentsMargins(24, 18, 24, 18)
         
         self._lbl_greeting_card = QLabel(f"Loading...")
-        self._lbl_greeting_card.setStyleSheet("color: #311B92; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+        self._lbl_greeting_card.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
         
         card_layout.addWidget(self._lbl_greeting_card, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(card, stretch=1)
@@ -764,7 +764,7 @@ class DashboardPage(QWidget):
             card.setStyleSheet(f"""
                 QFrame#welcomeCard {{
                     background-color: {c('info_bg')};
-                    border: 1px solid #D1C4E9;
+                    border: 1px solid {c('welcome_border')};
                     border-radius: 14px;
                 }}
                 QFrame#welcomeCard QLabel {{
@@ -772,6 +772,8 @@ class DashboardPage(QWidget):
                     border: none;
                 }}
             """)
+        if hasattr(self, '_lbl_greeting_card') and self._lbl_greeting_card:
+            self._lbl_greeting_card.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
         for card in self.findChildren(QFrame, "statCard"):
             card.setStyleSheet(f"""
                 QFrame#statCard {{

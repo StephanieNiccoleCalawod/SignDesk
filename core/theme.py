@@ -91,6 +91,8 @@ COLORS = {
     "warn_bg":    ("#FAEEDA", "#3A2A0D"),
     "info":       ("#5E35B1", "#A78BFA"),
     "info_bg":    ("#EDE7F6", "#2C2245"),
+    "welcome_title": ("#311B92", "#C4B5FD"),
+    "welcome_border": ("#D1C4E9", "#4A3B70"),
 
     # Badge shades
     "badge_gray_bg": ("#F0F0F0", "#272730"),
