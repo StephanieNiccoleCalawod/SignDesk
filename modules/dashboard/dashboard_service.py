@@ -123,17 +123,30 @@ def get_dashboard_summary(username: str) -> Optional[DashboardSummary]:
     from modules.gesture_history.backend import get_setting as _get_hist_setting
     history_logging_off = (_get_hist_setting("logging_enabled") != "1")
 
-    # ── Sessions Today: count from audit log login events ──────────────────
-    sessions_today = 0
+    # 3. New Analytics (Quiz Results) — fetched early, reused below
+    quiz_results = get_quiz_results(username)
+
+    # ── Sessions Today: group today's quiz activity by 15-min gaps ─────────
+    SESSION_GAP_MINUTES = 15
     today_date = datetime.now().date()
-    for e in events:
-        if e.get("event") == "LOGIN_SUCCESS":
-            try:
-                ev_dt = datetime.fromisoformat(e["timestamp"])
-                if ev_dt.date() == today_date:
-                    sessions_today += 1
-            except (ValueError, KeyError):
-                pass
+    today_attempts = []
+
+    for row in quiz_results:
+        logged_at = row.get("logged_at", "")
+        try:
+            dt = datetime.fromisoformat(logged_at)
+            if dt.date() == today_date:
+                today_attempts.append(dt)
+        except ValueError:
+            pass
+
+    today_attempts.sort()
+    sessions_today = 0
+    last_ts = None
+    for ts in today_attempts:
+        if last_ts is None or (ts - last_ts) > timedelta(minutes=SESSION_GAP_MINUTES):
+            sessions_today += 1
+        last_ts = ts
 
     # ── Legacy Signs / Confidence ───────────────────────────────────────────
     unique_signs: set[str] = set()
@@ -167,9 +180,7 @@ def get_dashboard_summary(username: str) -> Optional[DashboardSummary]:
 
     avg_confidence = (total_confidence / count_confidence * 100) if count_confidence > 0 else 0.0
     
-    # 3. New Analytics (Quiz Results)
-    quiz_results = get_quiz_results(username)
-    
+    # 3. New Analytics (Quiz Results) — already fetched above
     total_attempts = len(quiz_results)
     completed_attempts = 0
     correct_answers = 0

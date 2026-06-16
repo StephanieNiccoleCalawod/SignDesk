@@ -1,5 +1,3 @@
-
-
 import os
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
@@ -152,85 +150,106 @@ class ProfileDropdown(QFrame):
             
         self.adjustSize()
 
-class AnalyticsRingCard(QFrame):
+class StatSummaryCard(QFrame):
     """
-    Animated circular progress card for Dashboard Analytics.
+    Flat stat card for Dashboard Analytics.
+    Shows an emoji icon, a large primary value, a label, and a
+    colour-coded accent bar along the left edge.
+    Replaces the three identical purple rings.
     """
-    def __init__(self, title: str, parent=None):
+
+    def __init__(
+        self,
+        title: str,
+        icon: str,
+        accent_color: str,
+        parent=None,
+    ):
         super().__init__(parent)
-        self.setObjectName("analyticsCard")
-        self.setMinimumSize(160, 160)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        self.title = title
-        self.target_percentage = 0.0
-        self._current_val = 0.0
-        
-        # We will use rgba for the lavender/violet color theme
-        self.bg_color = "rgba(108, 99, 255, 20)"  # Track background
-        self.fg_color = "rgba(108, 99, 255, 255)" # Progress arc
-        
-        self.anim = QPropertyAnimation(self, b"currentVal")
-        self.anim.setDuration(1200)
-        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.setObjectName("statSummaryCard")
+        self.setMinimumSize(160, 110)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
 
+        # ── layout ──────────────────────────────────────────
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Coloured left accent bar
+        bar = QFrame()
+        bar.setFixedWidth(5)
+        bar.setStyleSheet(
+            f"background-color: {accent_color}; border-radius: 3px;"
+        )
+        outer.addWidget(bar)
+
+        content = QVBoxLayout()
+        content.setContentsMargins(14, 14, 14, 14)
+        content.setSpacing(3)
+
+        # Icon (hidden when empty)
+        icon_lbl = QLabel(icon)
+        icon_lbl.setStyleSheet("background: transparent;")
+        _set_font(icon_lbl, size=18)
+        if icon:
+            content.addWidget(icon_lbl)
+
+        # Primary value (large, coloured)
+        self._val_lbl = QLabel("—")
+        self._val_lbl.setStyleSheet(
+            f"color: {accent_color}; background: transparent;"
+        )
+        _set_font(self._val_lbl, size=24, bold=True)
+        content.addWidget(self._val_lbl)
+
+        # Title / label
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(
+            f"color: {c('text_primary')}; background: transparent;"
+        )
+        _set_font(title_lbl, size=10, bold=True)
+        title_lbl.setWordWrap(True)
+        content.addWidget(title_lbl)
+
+        # Sub-label (optional context line)
+        self._sub_lbl = QLabel("")
+        self._sub_lbl.setStyleSheet(
+            f"color: {c('text_muted')}; background: transparent;"
+        )
+        _set_font(self._sub_lbl, size=9)
+        self._sub_lbl.setWordWrap(True)
+        self._sub_lbl.hide()
+        content.addWidget(self._sub_lbl)
+
+        content.addStretch()
+        outer.addLayout(content)
+
+        # Card background + shadow
+        self.setStyleSheet(
+            f"""
+            QFrame#statSummaryCard {{
+                background-color: {c('bg_primary')};
+                border-radius: 14px;
+            }}
+            """
+        )
+        _add_shadow(self)
+
+    def set_value(self, primary: str, sub: str = ""):
+        """Update the displayed value and optional sub-label."""
+        self._val_lbl.setText(primary)
+        self._sub_lbl.setText(sub)
+        self._sub_lbl.setVisible(bool(sub))
+
+    # keep backward-compat alias
     def set_percentage(self, val: float):
-        self.target_percentage = val
-        self.anim.setStartValue(0.0)
-        self.anim.setEndValue(val)
-        self.anim.start()
+        self.set_value(f"{int(val)}%")
 
-    def _get_val(self) -> float:
-        return self._current_val
 
-    def _set_val(self, v: float):
-        self._current_val = v
-        self.update()
-
-    currentVal = pyqtProperty(float, _get_val, _set_val)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Draw card background
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#E8E2F9")) # Light lavender background
-        painter.drawRoundedRect(self.rect(), 14, 14)
-
-        # Draw ring track - maintain a circle centered horizontally
-        padding = 24
-        ring_size = min(self.width() - padding * 2, self.height() - 40 - padding)
-        center_x = self.width() // 2
-        center_y = (self.height() - 36) // 2
-        ring_rect = QRect(center_x - ring_size // 2, center_y - ring_size // 2, ring_size, ring_size)
-
-        track_pen = QPen(QColor(self.bg_color), 14)
-        painter.setPen(track_pen)
-        painter.drawEllipse(ring_rect)
-
-        # Draw progress arc
-        if self._current_val > 0:
-            arc_pen = QPen(QColor(self.fg_color), 14, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-            painter.setPen(arc_pen)
-            span = int(-self._current_val * 3.6 * 16)
-            painter.drawArc(ring_rect, 90 * 16, span)
-
-        # Draw percentage text
-        painter.setPen(QColor("#000000"))
-        font = QFont("Segoe UI", 20, QFont.Weight.Medium)
-        painter.setFont(font)
-        text_rect = ring_rect.adjusted(0, 0, 0, 0)
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, f"{int(self._current_val)}%")
-
-        # Draw title text
-        painter.setPen(QColor("#000000"))
-        title_font = QFont("Segoe UI", 11)
-        painter.setFont(title_font)
-        title_rect = QRect(0, self.height() - 36, self.width(), 30)
-        painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, self.title)
-        
-        painter.end()
+# ── keep old name as alias so any other callers still work ──────────────────
+AnalyticsRingCard = StatSummaryCard
 
 
 class DashboardPage(QWidget):
@@ -242,9 +261,10 @@ class DashboardPage(QWidget):
         
         # Keep references for dynamic updates
         self._lbl_greeting_card = None
-        self._ring_total_sessions = None
-        self._ring_avg_learning = None
-        self._ring_days_learned = None
+        self._card_sessions  = None
+        self._card_accuracy  = None
+        self._card_signs     = None
+        self._card_streak    = None
         
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -278,12 +298,28 @@ class DashboardPage(QWidget):
         if self._lbl_greeting_card:
             self._lbl_greeting_card.setText(f"{summary.greeting}, {summary.display_name}")
 
-        if self._ring_total_sessions:
-            self._ring_total_sessions.set_percentage(summary.total_session_completion)
-        if self._ring_avg_learning:
-            self._ring_avg_learning.set_percentage(summary.average_learning_accuracy)
-        if self._ring_days_learned:
-            self._ring_days_learned.set_percentage(summary.days_learned_pct)
+        if self._card_sessions:
+            self._card_sessions.set_value(
+                str(summary.sessions_today),
+                "practice runs today"
+            )
+        if self._card_accuracy:
+            self._card_accuracy.set_value(
+                f"{int(summary.average_learning_accuracy)}%",
+                f"completion rate: {int(summary.total_session_completion)}%"
+            )
+        if self._card_signs:
+            from modules.gesture_history.backend import get_quiz_results
+            quiz_results = get_quiz_results(self._username)
+            self._card_signs.set_value(
+                str(len(quiz_results)),
+                "total quiz attempts"
+            )
+        if self._card_streak:
+            self._card_streak.set_value(
+                f"{int(summary.days_learned_pct)}%",
+                "active days this month"
+            )
 
     # ── Navigation callbacks ───────────────────────────────
 
@@ -451,8 +487,10 @@ class DashboardPage(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(24, 18, 24, 18)
         
-        self._lbl_greeting_card = QLabel(f"Loading...")
-        self._lbl_greeting_card.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+        self._lbl_greeting_card = QLabel(f"Good Morning, Loading...")
+        self._lbl_greeting_card.setStyleSheet(
+            f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold; background: transparent; border: none;"
+        )
         
         card_layout.addWidget(self._lbl_greeting_card, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(card, stretch=1)
@@ -603,15 +641,17 @@ class DashboardPage(QWidget):
         row.setStyleSheet("background: transparent;")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(24)
+        layout.setSpacing(16)
 
-        self._ring_total_sessions = AnalyticsRingCard("Total Session")
-        self._ring_avg_learning = AnalyticsRingCard("Average Learning")
-        self._ring_days_learned = AnalyticsRingCard("Days Learned")
+        # Four stat cards — unified violet palette, no emojis
+        self._card_sessions  = StatSummaryCard("Sessions Today",   "", "#6C63FF")
+        self._card_accuracy  = StatSummaryCard("Avg Accuracy",     "", "#7C73FF")
+        self._card_signs     = StatSummaryCard("Total Attempts",   "", "#9D97FF")
+        self._card_streak    = StatSummaryCard("Days Active",      "", "#B8B4FF")
 
-        layout.addWidget(self._ring_total_sessions)
-        layout.addWidget(self._ring_avg_learning)
-        layout.addWidget(self._ring_days_learned)
+        for card in (self._card_sessions, self._card_accuracy,
+                     self._card_signs, self._card_streak):
+            layout.addWidget(card)
 
         wrapper_layout.addWidget(row)
         parent_layout.addWidget(wrapper)
@@ -726,6 +766,10 @@ class DashboardPage(QWidget):
         if hasattr(self, '_main_content_widget') and self._main_content_widget:
             self._main_content_widget.setStyleSheet(f"background-color: {c('bg_secondary')};")
         
+        if hasattr(self, '_lbl_greeting_card') and self._lbl_greeting_card:
+            self._lbl_greeting_card.setStyleSheet(
+                f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold; background: transparent; border: none;"
+            )
         if hasattr(self, '_search_frame') and self._search_frame:
             self._search_frame.setStyleSheet(f"""
                 QFrame#searchFrame {{
@@ -772,8 +816,6 @@ class DashboardPage(QWidget):
                     border: none;
                 }}
             """)
-        if hasattr(self, '_lbl_greeting_card') and self._lbl_greeting_card:
-            self._lbl_greeting_card.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
         for card in self.findChildren(QFrame, "statCard"):
             card.setStyleSheet(f"""
                 QFrame#statCard {{

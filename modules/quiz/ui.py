@@ -1,13 +1,11 @@
-
-
 import os
 import random
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QProgressBar, QGridLayout, QSizePolicy, QSpacerItem, QRadioButton, QButtonGroup,
-    QGraphicsDropShadowEffect,
+    QGraphicsDropShadowEffect, QScrollArea,
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPropertyAnimation, QVariantAnimation, QEasingCurve, pyqtProperty
 from PyQt6.QtGui import QCursor, QFont, QColor, QPainter, QPen, QPixmap, QLinearGradient, QBrush
 
 from components.layout.sidebar import Sidebar
@@ -15,6 +13,8 @@ from core.theme import c, is_dark, ThemeSignal
 from core.ui_helpers import _set_font, _add_shadow
 from modules.reference.constants import LETTER_METADATA
 from modules.gesture_history.backend import log_quiz_result
+
+print(f"[SignDesk] quiz UI loaded from: {__file__}")
 
 
 class ResultsRing(QWidget):
@@ -181,12 +181,12 @@ class GestureCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.setFixedSize(200, 180)
+        self.setFixedSize(190, 178)
         self._letter = ""
         self._interactive = True
 
         _layout = QVBoxLayout(self)
-        _layout.setContentsMargins(6, 6, 6, 6)
+        _layout.setContentsMargins(10, 10, 10, 10)
         _layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.img_label = QLabel()
@@ -207,7 +207,7 @@ class GestureCard(QFrame):
             pixmap = QPixmap(img_path)
             if not pixmap.isNull():
                 scaled = pixmap.scaled(
-                    175, 155,
+                    156, 138,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
@@ -244,6 +244,116 @@ class GestureCard(QFrame):
         self._shadow.setOffset(0, 2)
         self._shadow.setColor(QColor(0, 0, 0, 30))
         super().leaveEvent(event)
+
+
+def _lerp_color(c1: QColor, c2: QColor, t: float) -> QColor:
+    """Linear interpolate between two QColors (matches the sidebar's fade)."""
+    return QColor(
+        int(c1.red()   + (c2.red()   - c1.red())   * t),
+        int(c1.green() + (c2.green() - c1.green()) * t),
+        int(c1.blue()  + (c2.blue()  - c1.blue())  * t),
+        int(c1.alpha() + (c2.alpha() - c1.alpha()) * t),
+    )
+
+
+class AnimatedButton(QPushButton):
+    """
+    QPushButton with the same smooth hover color-fade used by the navigation
+    sidebar's NavItem (QVariantAnimation + OutCubic). It self-styles on every
+    animation tick, so never call setStyleSheet() on it directly — use
+    configure() and let the page re-apply on theme change.
+    """
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._radius = 20
+        self._font_size = 13
+        self._border_w = 0
+        self._idle_bg = QColor("#6C63FF")
+        self._hover_bg = QColor("#5A52E0")
+        self._idle_text = QColor("#FFFFFF")
+        self._hover_text = QColor("#FFFFFF")
+        self._border_col = QColor(0, 0, 0, 0)
+        self._t = 0.0
+
+        self._anim = QVariantAnimation()
+        self._anim.setDuration(170)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.valueChanged.connect(self._on_tick)
+        self._apply(0.0)
+
+    def configure(self, idle_bg, hover_bg, idle_text, hover_text,
+                  border_col=None, border_w=0, radius=20, font_size=13):
+        self._idle_bg = QColor(idle_bg)
+        self._hover_bg = QColor(hover_bg)
+        self._idle_text = QColor(idle_text)
+        self._hover_text = QColor(hover_text)
+        self._border_col = QColor(border_col) if border_col is not None else QColor(0, 0, 0, 0)
+        self._border_w = border_w
+        self._radius = radius
+        self._font_size = font_size
+        self._anim.stop()
+        self._t = 0.0
+        self._apply(0.0)
+
+    def _on_tick(self, val):
+        self._t = (val or 0) / 1000.0
+        self._apply(self._t)
+
+    @staticmethod
+    def _rgba(col: QColor) -> str:
+        return f"rgba({col.red()},{col.green()},{col.blue()},{col.alpha()})"
+
+    def _apply(self, t: float):
+        if not self.isEnabled():
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: rgba(130,130,140,38);
+                    color: rgba(150,150,160,210);
+                    border: {self._border_w}px solid rgba(130,130,140,60);
+                    border-radius: {self._radius}px;
+                    font-size: {self._font_size}px;
+                    font-weight: bold;
+                }}
+            """)
+            return
+        bg = _lerp_color(self._idle_bg, self._hover_bg, t)
+        tx = _lerp_color(self._idle_text, self._hover_text, t)
+        border = f"{self._border_w}px solid {self._rgba(self._border_col)}" if self._border_w else "none"
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self._rgba(bg)};
+                color: {self._rgba(tx)};
+                border: {border};
+                border-radius: {self._radius}px;
+                font-size: {self._font_size}px;
+                font-weight: bold;
+            }}
+        """)
+
+    def enterEvent(self, event):
+        if self.isEnabled():
+            self._anim.stop()
+            self._anim.setStartValue(int(self._t * 1000))
+            self._anim.setEndValue(1000)
+            self._anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.isEnabled():
+            self._anim.stop()
+            self._anim.setStartValue(int(self._t * 1000))
+            self._anim.setEndValue(0)
+            self._anim.start()
+        super().leaveEvent(event)
+
+    def changeEvent(self, event):
+        from PyQt6.QtCore import QEvent
+        if event.type() == QEvent.Type.EnabledChange:
+            self._anim.stop()
+            self._t = 0.0
+            self._apply(0.0)
+        super().changeEvent(event)
 
 
 class FlashcardQuizPage(QWidget):
@@ -302,11 +412,17 @@ class FlashcardQuizPage(QWidget):
         """)
         
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(24, 18, 24, 18)
+        card_layout.setContentsMargins(24, 14, 24, 14)
+        card_layout.setSpacing(2)
 
         self.title_lbl = QLabel("Flashcard Recognition Quiz")
-        self.title_lbl.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+        self.title_lbl.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 24px; font-weight: bold;")
         card_layout.addWidget(self.title_lbl, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        self.subtitle_lbl = QLabel("Practice and improve your gesture recognition accuracy")
+        self.subtitle_lbl.setObjectName("headerSubtitle")
+        _set_font(self.subtitle_lbl, size=11)
+        card_layout.addWidget(self.subtitle_lbl, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         
         tb_layout.addWidget(card, stretch=1)
 
@@ -324,12 +440,28 @@ class FlashcardQuizPage(QWidget):
         content_layout.setContentsMargins(28, 8, 28, 24)
         content_layout.setSpacing(20)
 
-        # Left Column: The Main Active Screen Card
+        # Left Column: The Main Active Screen Card (scrollable so content never overlaps)
         self.main_card = QFrame()
         self.main_card.setObjectName("quizMainCard")
-        self.card_layout = QVBoxLayout(self.main_card)
+        main_card_outer = QVBoxLayout(self.main_card)
+        main_card_outer.setContentsMargins(0, 0, 0, 0)
+        main_card_outer.setSpacing(0)
+
+        self._screens_scroll = QScrollArea()
+        self._screens_scroll.setWidgetResizable(True)
+        self._screens_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._screens_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._screens_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        screens_host = QWidget()
+        screens_host.setStyleSheet("background: transparent;")
+        self.card_layout = QVBoxLayout(screens_host)
         self.card_layout.setContentsMargins(24, 24, 24, 24)
         self.card_layout.setSpacing(20)
+
+        self._screens_scroll.setWidget(screens_host)
+        self._screens_scroll.viewport().setStyleSheet("background: transparent;")
+        main_card_outer.addWidget(self._screens_scroll)
         content_layout.addWidget(self.main_card, stretch=3)
 
         # Right Column: Side Stats Panel
@@ -456,7 +588,7 @@ class FlashcardQuizPage(QWidget):
         layout.addSpacing(15)
 
         self.btn_start = QPushButton("Start Quiz")
-        self.btn_start.setFixedSize(180, 44)
+        self.btn_start.setFixedSize(200, 48)
         self.btn_start.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.btn_start.clicked.connect(self.start_quiz)
         layout.addWidget(self.btn_start, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -538,7 +670,7 @@ class FlashcardQuizPage(QWidget):
         for i in range(4):
             btn = QPushButton("")
             btn.setObjectName(f"choiceBtn_{i}")
-            btn.setFixedSize(70, 48)
+            btn.setFixedSize(76, 56)
             btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             # Lambda capture correct button callback
             btn.clicked.connect(lambda checked, b=btn: self.on_choice_selected(b))
@@ -551,10 +683,35 @@ class FlashcardQuizPage(QWidget):
         choices_container_layout.addWidget(choices_wrap, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(choices_container)
 
+        # ── Reveal / Skip / Next action row ──────────────────────────────────
+        fc_actions_row = QWidget()
+        fc_actions_layout = QHBoxLayout(fc_actions_row)
+        fc_actions_layout.setContentsMargins(0, 0, 0, 0)
+        fc_actions_layout.setSpacing(16)
+        fc_actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.fc_btn_reveal = AnimatedButton("Reveal")
+        self.fc_btn_reveal.setFixedSize(116, 42)
+        self.fc_btn_reveal.clicked.connect(self.reveal_fc_answer)
+        fc_actions_layout.addWidget(self.fc_btn_reveal)
+
+        self.fc_btn_skip = AnimatedButton("Skip")
+        self.fc_btn_skip.setFixedSize(116, 42)
+        self.fc_btn_skip.clicked.connect(self.skip_fc_question)
+        fc_actions_layout.addWidget(self.fc_btn_skip)
+
+        self.fc_btn_next = AnimatedButton("Next")
+        self.fc_btn_next.setFixedSize(116, 42)
+        self.fc_btn_next.setEnabled(False)
+        self.fc_btn_next.clicked.connect(self.next_fc_question)
+        fc_actions_layout.addWidget(self.fc_btn_next)
+
+        layout.addWidget(fc_actions_row)
+        layout.addSpacing(4)
+
         # Stop Quizzing Button
-        self.btn_stop_quizzing = QPushButton("Stop Quizzing")
-        self.btn_stop_quizzing.setFixedSize(140, 36)
-        self.btn_stop_quizzing.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.btn_stop_quizzing = AnimatedButton("Stop Quizzing")
+        self.btn_stop_quizzing.setFixedSize(140, 38)
         self.btn_stop_quizzing.clicked.connect(self.stop_quizzing)
         layout.addWidget(self.btn_stop_quizzing, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -644,26 +801,29 @@ class FlashcardQuizPage(QWidget):
         mc_actions_layout.setSpacing(16)
         mc_actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.mc_btn_reveal = QPushButton("Reveal")
-        self.mc_btn_reveal.setFixedSize(120, 38)
-        self.mc_btn_reveal.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.mc_btn_reveal = AnimatedButton("Reveal")
+        self.mc_btn_reveal.setFixedSize(116, 42)
         self.mc_btn_reveal.clicked.connect(self.reveal_mc_answer)
         mc_actions_layout.addWidget(self.mc_btn_reveal)
 
-        self.mc_btn_skip = QPushButton("Skip")
-        self.mc_btn_skip.setFixedSize(120, 38)
-        self.mc_btn_skip.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.mc_btn_skip = AnimatedButton("Skip")
+        self.mc_btn_skip.setFixedSize(116, 42)
         self.mc_btn_skip.clicked.connect(self.skip_mc_question)
         mc_actions_layout.addWidget(self.mc_btn_skip)
+
+        self.mc_btn_next = AnimatedButton("Next")
+        self.mc_btn_next.setFixedSize(116, 42)
+        self.mc_btn_next.setEnabled(False)
+        self.mc_btn_next.clicked.connect(self.next_mc_question)
+        mc_actions_layout.addWidget(self.mc_btn_next)
 
         layout.addWidget(mc_actions_row)
 
         layout.addSpacing(4)
 
         # ── Stop Quizzing Button ─────────────────────────────────────────────
-        self.mc_btn_stop = QPushButton("Stop Practicing")
-        self.mc_btn_stop.setFixedSize(150, 36)
-        self.mc_btn_stop.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.mc_btn_stop = AnimatedButton("Stop Practicing")
+        self.mc_btn_stop.setFixedSize(150, 38)
         self.mc_btn_stop.clicked.connect(self.stop_quizzing)
         layout.addWidget(self.mc_btn_stop, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -788,6 +948,7 @@ class FlashcardQuizPage(QWidget):
 
         # Score box layout grid
         score_grid_w = QWidget()
+        score_grid_w.setStyleSheet("background: transparent; border: none;")
         score_grid = QGridLayout(score_grid_w)
         score_grid.setContentsMargins(0, 0, 0, 0)
         score_grid.setSpacing(6)
@@ -830,9 +991,6 @@ class FlashcardQuizPage(QWidget):
         sac_layout = QHBoxLayout(self.side_accuracy_card)
         sac_layout.setContentsMargins(10, 6, 10, 6)
         sac_layout.setSpacing(8)
-        lbl_a_icon = QLabel("📊")
-        _set_font(lbl_a_icon, size=14)
-        sac_layout.addWidget(lbl_a_icon)
         lbl_a_lbl = QLabel("Accuracy")
         _set_font(lbl_a_lbl, size=10)
         lbl_a_lbl.setStyleSheet(f"color: {c('text_secondary')};")
@@ -869,10 +1027,6 @@ class FlashcardQuizPage(QWidget):
         streak_card_layout = QHBoxLayout(self.streak_card)
         streak_card_layout.setContentsMargins(10, 8, 10, 8)
         streak_card_layout.setSpacing(8)
-
-        flame_lbl = QLabel("🔥")
-        _set_font(flame_lbl, size=18)
-        streak_card_layout.addWidget(flame_lbl)
 
         self.lbl_streak_val = QLabel("0")
         self.lbl_streak_val.setStyleSheet(f"color: #F97316;")
@@ -981,7 +1135,8 @@ class FlashcardQuizPage(QWidget):
         correct_letter = self.deck[self.current_idx]
 
         # Update Progress Counter and Segmented Bar
-        self.progress_lbl.setText(f"Question {self.current_idx + 1} of {self.deck_size}")
+        _pct = round(((self.current_idx + 1) / self.deck_size) * 100) if self.deck_size else 0
+        self.progress_lbl.setText(f"Question {self.current_idx + 1} of {self.deck_size}  ·  {_pct}%")
         self.progress_bar.configure(self.deck_size, self.answers)
         self.progress_bar.set_current(self.current_idx)
 
@@ -1023,15 +1178,24 @@ class FlashcardQuizPage(QWidget):
                     background-color: {c('bg_primary')};
                     color: {c('text_primary')};
                     border: 2px solid {c('border')};
-                    border-radius: 8px;
-                    font-size: 16px;
+                    border-radius: 14px;
+                    font-size: 18px;
                     font-weight: bold;
                 }}
                 QPushButton:hover {{
                     border: 2px solid {c('accent')};
-                    background-color: {c('input_bg')};
+                    background-color: {c('info_bg')};
+                    color: {c('welcome_title')};
+                }}
+                QPushButton:pressed {{
+                    background-color: {c('border')};
                 }}
             """)
+
+        # Reset action buttons for the new question
+        self.fc_btn_reveal.setEnabled(True)
+        self.fc_btn_skip.setEnabled(True)
+        self.fc_btn_next.setEnabled(False)
 
         self.set_feedback("neutral", "Your Turn!", f"What letter does this hand sign represent?")
 
@@ -1086,8 +1250,8 @@ class FlashcardQuizPage(QWidget):
                         background-color: {c('success_bg')};
                         color: {c('success')};
                         border: 2px solid {c('success')};
-                        border-radius: 8px;
-                        font-size: 16px;
+                        border-radius: 14px;
+                        font-size: 18px;
                         font-weight: bold;
                     }}
                 """)
@@ -1098,8 +1262,8 @@ class FlashcardQuizPage(QWidget):
                         background-color: {c('error_bg')};
                         color: {c('error')};
                         border: 2px solid {c('error')};
-                        border-radius: 8px;
-                        font-size: 16px;
+                        border-radius: 14px;
+                        font-size: 18px;
                         font-weight: bold;
                     }}
                 """)
@@ -1109,9 +1273,9 @@ class FlashcardQuizPage(QWidget):
                     QPushButton {{
                         background-color: {c('bg_primary')};
                         color: {c('text_muted')};
-                        border: 1px solid {c('border')};
-                        border-radius: 8px;
-                        font-size: 16px;
+                        border: 2px solid {c('border')};
+                        border-radius: 14px;
+                        font-size: 18px;
                         font-weight: bold;
                     }}
                 """)
@@ -1128,8 +1292,10 @@ class FlashcardQuizPage(QWidget):
 
         self.update_scores()
 
-        # Automatic progression after 1.5s delay
-        QTimer.singleShot(1500, self.advance_quiz)
+        # Wait for the user to advance manually via the Next button
+        self.fc_btn_reveal.setEnabled(False)
+        self.fc_btn_skip.setEnabled(False)
+        self.fc_btn_next.setEnabled(True)
 
     def advance_quiz(self):
         self.current_idx += 1
@@ -1137,6 +1303,73 @@ class FlashcardQuizPage(QWidget):
             self.show_results()
         else:
             self.render_question()
+
+    def reveal_fc_answer(self):
+        """Reveal the correct letter without answering — counts as missed."""
+        if self.is_answered:
+            return
+        self.is_answered = True
+
+        correct_letter = self.deck[self.current_idx]
+        self.answers[self.current_idx] = False  # counts as missed
+        self.streak = 0
+        self.progress_bar.configure(self.deck_size, self.answers)
+
+        # Highlight the correct choice green, dim the rest
+        for btn in self.choice_buttons:
+            btn.setEnabled(False)
+            if btn.text() == correct_letter:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {c('success_bg')};
+                        color: {c('success')};
+                        border: 2px solid {c('success')};
+                        border-radius: 14px;
+                        font-size: 18px;
+                        font-weight: bold;
+                    }}
+                """)
+            else:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {c('bg_primary')};
+                        color: {c('text_muted')};
+                        border: 2px solid {c('border')};
+                        border-radius: 14px;
+                        font-size: 18px;
+                        font-weight: bold;
+                    }}
+                """)
+
+        self.fc_btn_reveal.setEnabled(False)
+        self.fc_btn_skip.setEnabled(False)
+        self.fc_btn_next.setEnabled(True)
+
+        desc = LETTER_METADATA.get(correct_letter, {}).get("tip", "Keep practicing!")
+        self.set_feedback("wrong", f"Answer: {correct_letter}", desc)
+        self.update_scores()
+
+    def skip_fc_question(self):
+        """Skip the current question — counts as missed and moves straight on."""
+        if self.is_answered:
+            return
+        self.is_answered = True
+
+        self.answers[self.current_idx] = False  # counts as missed
+        self.streak = 0
+        self.progress_bar.configure(self.deck_size, self.answers)
+
+        self.fc_btn_reveal.setEnabled(False)
+        self.fc_btn_skip.setEnabled(False)
+
+        self.update_scores()
+        self.advance_quiz()
+
+    def next_fc_question(self):
+        """Manually advance to the next question (enabled after answering/revealing)."""
+        if not self.is_answered:
+            return
+        self.advance_quiz()
 
     # ── Multiple Choice Mode Methods ─────────────────────────────────────────
 
@@ -1146,7 +1379,8 @@ class FlashcardQuizPage(QWidget):
         correct_letter = self.deck[self.current_idx]
 
         # Update progress
-        self.mc_progress_lbl.setText(f"Question {self.current_idx + 1} of {self.deck_size}")
+        _pct = round(((self.current_idx + 1) / self.deck_size) * 100) if self.deck_size else 0
+        self.mc_progress_lbl.setText(f"Question {self.current_idx + 1} of {self.deck_size}  ·  {_pct}%")
         self.mc_progress_bar.configure(self.deck_size, self.answers)
         self.mc_progress_bar.set_current(self.current_idx)
 
@@ -1170,7 +1404,7 @@ class FlashcardQuizPage(QWidget):
             card.set_interactive(True)
             card.setStyleSheet(f"""
                 QFrame {{
-                    background-color: {c('panel_left')};
+                    background-color: {c('bg_primary')};
                     border: 2px solid {c('border')};
                     border-radius: 12px;
                 }}
@@ -1179,6 +1413,7 @@ class FlashcardQuizPage(QWidget):
         # Enable action buttons
         self.mc_btn_reveal.setEnabled(True)
         self.mc_btn_skip.setEnabled(True)
+        self.mc_btn_next.setEnabled(False)
 
         self.set_feedback("neutral", "Your Turn!", f"Which gesture represents the letter {correct_letter}?")
 
@@ -1235,15 +1470,16 @@ class FlashcardQuizPage(QWidget):
             else:
                 card.setStyleSheet(f"""
                     QFrame {{
-                        background-color: {c('panel_left')};
+                        background-color: {c('bg_primary')};
                         border: 2px solid {c('border')};
                         border-radius: 12px;
                     }}
                 """)
 
-        # Disable Reveal / Skip buttons
+        # Disable Reveal / Skip buttons; enable Next for manual advance
         self.mc_btn_reveal.setEnabled(False)
         self.mc_btn_skip.setEnabled(False)
+        self.mc_btn_next.setEnabled(True)
 
         # Update scoring and feedback
         if is_correct:
@@ -1257,8 +1493,11 @@ class FlashcardQuizPage(QWidget):
 
         self.update_scores()
 
-        delay = 1500 if is_correct else 2000
-        QTimer.singleShot(delay, self.advance_mc_quiz)
+    def next_mc_question(self):
+        """Manually advance to the next question (enabled after answering/revealing)."""
+        if not self.is_answered:
+            return
+        self.advance_mc_quiz()
 
     def advance_mc_quiz(self):
         """Advance to next question or show results in MC mode."""
@@ -1295,7 +1534,7 @@ class FlashcardQuizPage(QWidget):
             else:
                 card.setStyleSheet(f"""
                     QFrame {{
-                        background-color: {c('panel_left')};
+                        background-color: {c('bg_primary')};
                         border: 2px solid {c('border')};
                         border-radius: 12px;
                     }}
@@ -1303,12 +1542,11 @@ class FlashcardQuizPage(QWidget):
 
         self.mc_btn_reveal.setEnabled(False)
         self.mc_btn_skip.setEnabled(False)
+        self.mc_btn_next.setEnabled(True)
 
         desc = LETTER_METADATA.get(correct_letter, {}).get("tip", "Keep practicing!")
         self.set_feedback("wrong", f"Answer: {correct_letter}", desc)
         self.update_scores()
-
-        QTimer.singleShot(2000, self.advance_mc_quiz)
 
     def skip_mc_question(self):
         """Skip the current question — counts as missed."""
@@ -1326,10 +1564,10 @@ class FlashcardQuizPage(QWidget):
         self.mc_btn_reveal.setEnabled(False)
         self.mc_btn_skip.setEnabled(False)
 
-        self.set_feedback("wrong", f"Skipped — Answer was {correct_letter}", "")
         self.update_scores()
 
-        QTimer.singleShot(1000, self.advance_mc_quiz)
+        # Skip moves straight on to the next question
+        self.advance_mc_quiz()
 
     def update_scores(self):
         correct = sum(1 for a in self.answers if a is True)
@@ -1350,32 +1588,42 @@ class FlashcardQuizPage(QWidget):
         self.fb_title.setText(title)
         self.fb_sub.setText(sub)
 
-        # Style box according to answer outcome
+        # Style box according to answer outcome (scoped selector so the
+        # border never cascades onto the inner QLabels)
         if kind == "correct":
             self.fb_box.setStyleSheet(f"""
-                background-color: {c('success_bg')};
-                border: 1px solid {c('success')};
-                border-radius: 8px;
+                QFrame#feedbackBox {{
+                    background-color: {c('success_bg')};
+                    border: 1px solid {c('success')};
+                    border-radius: 8px;
+                }}
+                QFrame#feedbackBox QLabel {{ background: transparent; border: none; }}
             """)
-            self.fb_title.setStyleSheet(f"color: {c('success')};")
-            self.fb_sub.setStyleSheet(f"color: {c('success')};")
+            self.fb_title.setStyleSheet(f"color: {c('success')}; background: transparent; border: none;")
+            self.fb_sub.setStyleSheet(f"color: {c('success')}; background: transparent; border: none;")
         elif kind == "wrong":
             self.fb_box.setStyleSheet(f"""
-                background-color: {c('error_bg')};
-                border: 1px solid {c('error')};
-                border-radius: 8px;
+                QFrame#feedbackBox {{
+                    background-color: {c('error_bg')};
+                    border: 1px solid {c('error')};
+                    border-radius: 8px;
+                }}
+                QFrame#feedbackBox QLabel {{ background: transparent; border: none; }}
             """)
-            self.fb_title.setStyleSheet(f"color: {c('error')};")
-            self.fb_sub.setStyleSheet(f"color: {c('error')};")
+            self.fb_title.setStyleSheet(f"color: {c('error')}; background: transparent; border: none;")
+            self.fb_sub.setStyleSheet(f"color: {c('error')}; background: transparent; border: none;")
         else:
             # Neutral / Ready states
             self.fb_box.setStyleSheet(f"""
-                background-color: {c('input_bg')};
-                border: 1px solid {c('border')};
-                border-radius: 8px;
+                QFrame#feedbackBox {{
+                    background-color: {c('input_bg')};
+                    border: 1px solid {c('border')};
+                    border-radius: 8px;
+                }}
+                QFrame#feedbackBox QLabel {{ background: transparent; border: none; }}
             """)
-            self.fb_title.setStyleSheet(f"color: {c('text_primary')};")
-            self.fb_sub.setStyleSheet(f"color: {c('text_secondary')};")
+            self.fb_title.setStyleSheet(f"color: {c('text_primary')}; background: transparent; border: none;")
+            self.fb_sub.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; border: none;")
 
     def show_results(self):
         correct = sum(1 for a in self.answers if a is True)
@@ -1431,13 +1679,36 @@ class FlashcardQuizPage(QWidget):
     def retry_quiz(self):
         self.start_quiz()
 
-    def stop_quizzing(self):
+    def _themed_question(self, title: str, text: str) -> bool:
+        """Yes/No confirmation dialog with guaranteed-readable (themed) text."""
         from PyQt6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
-            self, "Stop Quiz", "Are you sure you want to stop the quiz session?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        box.setStyleSheet(f"""
+            QMessageBox {{ background-color: {c('bg_primary')}; }}
+            QMessageBox QLabel {{ color: {c('text_primary')}; background: transparent; }}
+            QMessageBox QPushButton {{
+                color: {c('text_primary')};
+                background-color: {c('input_bg')};
+                border: 1px solid {c('input_border')};
+                border-radius: 6px;
+                padding: 5px 18px;
+                min-width: 64px;
+                font-weight: bold;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {c('border')};
+                border-color: {c('accent')};
+            }}
+        """)
+        return box.exec() == QMessageBox.StandardButton.Yes
+
+    def stop_quizzing(self):
+        if self._themed_question("Stop Quiz", "Are you sure you want to stop the quiz session?"):
             answered_cnt = sum(1 for a in self.answers if a is not None)
             if answered_cnt > 0:
                 self.show_results()
@@ -1464,21 +1735,43 @@ class FlashcardQuizPage(QWidget):
             self._app.show_gesture_history(self._username)
 
     def _on_logout(self):
-        from PyQt6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
-            self, "Logout", "Are you sure you want to log out?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        if self._themed_question("Logout", "Are you sure you want to log out?"):
             self._app.show_login()
 
     def _on_theme_changed(self, is_dark: bool):
         self._update_styles()
 
+    def _style_action_btn(self, btn, kind: str):
+        """Apply a themed, animated palette to an AnimatedButton (re-run on theme change)."""
+        transparent = QColor(0, 0, 0, 0)
+        if kind == "success":
+            idle = QColor(c('success'))
+            btn.configure(idle, idle.darker(118), QColor("#FFFFFF"), QColor("#FFFFFF"),
+                          radius=20, font_size=13)
+        elif kind == "accent":
+            btn.configure(QColor(c('accent')), QColor(c('accent_hover')),
+                          QColor("#FFFFFF"), QColor("#FFFFFF"), radius=20, font_size=13)
+        elif kind == "outline":
+            btn.configure(transparent, QColor(c('input_bg')),
+                          QColor(c('text_primary')), QColor(c('accent')),
+                          border_col=QColor(c('input_border')), border_w=1,
+                          radius=20, font_size=13)
+        elif kind == "danger":
+            btn.configure(transparent, QColor(c('error_bg')),
+                          QColor(c('error')), QColor(c('error')),
+                          border_col=QColor(c('error')), border_w=1,
+                          radius=18, font_size=12)
+
     def _update_styles(self):
-        # Apply stylesheet to main widgets
-        self.setStyleSheet(f"QWidget#flashcardQuizPage {{ background-color: {c('bg_secondary')}; }}")
-        self.title_lbl.setStyleSheet(f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 26px; font-weight: bold;")
+        # ── Page background ──────────────────────────────────────────────────
+        self.setStyleSheet(f"QWidget#flashcardQuizPage {{ background-color: {c('bg_primary')}; }}")
+
+        # ── Header card ──────────────────────────────────────────────────────
+        self.title_lbl.setStyleSheet(
+            f"color: {c('welcome_title')}; font-family: 'Segoe UI'; font-size: 24px; font-weight: bold;"
+        )
+        if hasattr(self, 'subtitle_lbl'):
+            self.subtitle_lbl.setStyleSheet(f"color: {c('text_secondary')}; background: transparent; border: none;")
 
         for welcome_card in self.findChildren(QFrame, "welcomeCard"):
             welcome_card.setStyleSheet(f"""
@@ -1487,10 +1780,7 @@ class FlashcardQuizPage(QWidget):
                     border: 1px solid {c('welcome_border')};
                     border-radius: 14px;
                 }}
-                QFrame#welcomeCard QLabel {{
-                    background: transparent;
-                    border: none;
-                }}
+                QFrame#welcomeCard QLabel {{ background: transparent; border: none; }}
             """)
 
         self.avatar.setStyleSheet(f"""
@@ -1504,35 +1794,28 @@ class FlashcardQuizPage(QWidget):
             }}
         """)
 
-        # Main active Card Frame
+        # ── Main card + side panel (soft elevation) ──────────────────────────
         self.main_card.setStyleSheet(f"""
             QFrame#quizMainCard {{
                 background-color: {c('bg_primary')};
                 border: 1px solid {c('border')};
-                border-radius: 12px;
+                border-radius: 16px;
             }}
-            QFrame#quizMainCard QLabel {{
-                background: transparent;
-                border: none;
-            }}
+            QFrame#quizMainCard QLabel {{ background: transparent; border: none; }}
         """)
-        _add_shadow(self.main_card)
+        _add_shadow(self.main_card, blur=18, opacity=22, offset_y=4)
 
-        # Side Status Panel Frame
         self.side_panel.setStyleSheet(f"""
             QFrame#quizSidePanel {{
                 background-color: {c('bg_primary')};
                 border: 1px solid {c('border')};
-                border-radius: 12px;
+                border-radius: 16px;
             }}
-            QFrame#quizSidePanel QLabel {{
-                background: transparent;
-                border: none;
-            }}
+            QFrame#quizSidePanel QLabel {{ background: transparent; border: none; }}
         """)
-        _add_shadow(self.side_panel)
+        _add_shadow(self.side_panel, blur=18, opacity=22, offset_y=4)
 
-        # Setup Screen Widgets
+        # ── Setup screen ─────────────────────────────────────────────────────
         setup_title = self.setup_widget.findChild(QLabel, "setupTitle")
         if setup_title:
             setup_title.setStyleSheet(f"color: {c('text_primary')};")
@@ -1540,268 +1823,210 @@ class FlashcardQuizPage(QWidget):
         if setup_sub:
             setup_sub.setStyleSheet(f"color: {c('text_secondary')};")
 
-        # Radio buttons and containers styling
         radio_style = f"""
             QRadioButton {{
                 color: {c('text_primary')};
-                spacing: 10px;
-                font-size: 13px;
+                spacing: 12px;
+                font-size: 14px;
+                padding: 7px 4px;
                 background: transparent;
             }}
             QRadioButton::indicator {{
-                width: 18px;
-                height: 18px;
-                border-radius: 9px;
-                border: 2px solid {c('border')};
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                border: 2px solid {c('input_border')};
                 background-color: {c('bg_primary')};
             }}
             QRadioButton::indicator:hover {{
                 border-color: {c('accent')};
             }}
             QRadioButton::indicator:checked {{
-                border: 5px solid {c('input_bg')};
-                background-color: {c('accent')};
+                border: 6px solid {c('accent')};
+                background-color: {c('bg_primary')};
+            }}
+            QRadioButton:checked {{
+                color: {c('welcome_title')};
+                font-weight: bold;
             }}
         """
-        for r_btn in [self.mode_flashcard, self.mode_multiple_choice, self.mode_camera, self.set_random, self.set_all, self.set_shuffle]:
+        for r_btn in [self.mode_flashcard, self.mode_multiple_choice, self.mode_camera,
+                      self.set_random, self.set_all, self.set_shuffle]:
             r_btn.setStyleSheet(radio_style)
 
-        # Container styling update
         for container in self.setup_widget.findChildren(QFrame, "settingsContainer"):
             container.setStyleSheet(f"""
                 QFrame#settingsContainer {{
                     background-color: {c('input_bg')};
                     border: 1px solid {c('border')};
-                    border-radius: 8px;
+                    border-radius: 12px;
                 }}
             """)
 
-        # Label styling update
         for label_name in ["modeLabel", "setLabel"]:
             lbl = self.setup_widget.findChild(QLabel, label_name)
             if lbl:
-                lbl.setStyleSheet(f"color: {c('text_muted')};")
+                lbl.setStyleSheet(f"color: {c('text_muted')}; letter-spacing: 1px;")
 
-        # Start Quiz Button
-        self.btn_start.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c('accent')};
-                color: #FFFFFF;
-                border: none;
-                border-radius: 22px;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {c('accent_hover')};
-            }}
-        """)
+        # ── Button system ────────────────────────────────────────────────────
+        def primary_btn(color, hover, radius=12, fs=14):
+            return f"""
+                QPushButton {{
+                    background-color: {color};
+                    color: #FFFFFF;
+                    border: none;
+                    border-radius: {radius}px;
+                    font-size: {fs}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{ background-color: {hover}; }}
+                QPushButton:pressed {{ background-color: {hover}; padding-top: 1px; }}
+                QPushButton:disabled {{ background-color: {c('border')}; color: {c('text_muted')}; }}
+            """
 
-        # Quiz Screen components
+        def outline_btn(radius=12, fs=12):
+            return f"""
+                QPushButton {{
+                    background-color: transparent;
+                    color: {c('text_primary')};
+                    border: 1px solid {c('input_border')};
+                    border-radius: {radius}px;
+                    font-size: {fs}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{ background-color: {c('input_bg')}; border-color: {c('accent')}; }}
+                QPushButton:pressed {{ background-color: {c('border')}; }}
+            """
+
+        def danger_btn(radius=12, fs=12):
+            return f"""
+                QPushButton {{
+                    background-color: transparent;
+                    color: {c('error')};
+                    border: 1px solid {c('error')};
+                    border-radius: {radius}px;
+                    font-size: {fs}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{ background-color: {c('error_bg')}; }}
+                QPushButton:pressed {{ background-color: {c('error_bg')}; padding-top: 1px; }}
+            """
+
+        self.btn_start.setStyleSheet(primary_btn(c('accent'), c('accent_hover'), radius=14, fs=15))
+
+        # ── Quiz (flashcard) header ──────────────────────────────────────────
         self.quiz_mode_lbl.setStyleSheet(f"color: {c('text_primary')};")
-
-        # Progress pill
         self.progress_pill.setStyleSheet(f"""
             QFrame#progressPill {{
-                background-color: {c('accent')}20;
-                border: 1px solid {c('accent')}50;
-                border-radius: 12px;
+                background-color: {c('info_bg')};
+                border: 1px solid {c('welcome_border')};
+                border-radius: 13px;
             }}
         """)
-        self.progress_lbl.setStyleSheet(f"color: {c('accent')}; background: transparent; border: none;")
-
-        # The custom QuizProgressBar paints itself using c() — just trigger repaint
+        self.progress_lbl.setStyleSheet(f"color: {c('welcome_title')}; background: transparent; border: none;")
         self.progress_bar.update()
 
-        # ASL Image Container Box
         self.img_card.setStyleSheet(f"""
             QFrame#imgCard {{
                 background-color: {c('input_bg')};
                 border: 2px solid {c('border')};
-                border-radius: 10px;
+                border-radius: 16px;
             }}
         """)
 
-        # Results Screen components
+        # ── Results screen ───────────────────────────────────────────────────
         self.results_title.setStyleSheet(f"color: {c('text_primary')};")
         self.results_summary.setStyleSheet(f"color: {c('text_secondary')};")
 
-        # Results Summary Stat boxes
         stat_box_style = f"""
             QFrame {{
                 background-color: {c('input_bg')};
                 border: 1px solid {c('border')};
-                border-radius: 8px;
+                border-radius: 10px;
             }}
-            QLabel {{
-                background: transparent;
-                border: none;
-            }}
+            QLabel {{ background: transparent; border: none; }}
         """
         self.stat_box_correct.setStyleSheet(stat_box_style)
         self.stat_correct_val.setStyleSheet(f"color: {c('success')};")
         self.stat_box_missed.setStyleSheet(stat_box_style)
         self.stat_missed_val.setStyleSheet(f"color: {c('error')};")
 
-        # Action Buttons
-        self.btn_retry.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c('accent')};
-                color: #FFFFFF;
-                border: none;
-                border-radius: 19px;
-                font-size: 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {c('accent_hover')};
-            }}
-        """)
-
-        self.btn_dashboard.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {c('text_primary')};
-                border: 1px solid {c('border')};
-                border-radius: 19px;
-                font-size: 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {c('input_bg')};
-                border-color: {c('text_secondary')};
-            }}
-        """)
+        self.btn_retry.setStyleSheet(primary_btn(c('accent'), c('accent_hover'), radius=12, fs=12))
+        self.btn_dashboard.setStyleSheet(outline_btn(radius=12, fs=12))
 
         if hasattr(self, 'btn_stop_quizzing') and self.btn_stop_quizzing:
-            self.btn_stop_quizzing.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: transparent;
-                    color: {c('error')};
-                    border: 1px solid {c('error')};
-                    border-radius: 18px;
-                    font-size: 12px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: {c('error_bg')};
-                }}
-            """)
+            self._style_action_btn(self.btn_stop_quizzing, "danger")
+        if hasattr(self, 'fc_btn_reveal'):
+            self._style_action_btn(self.fc_btn_reveal, "success")
+        if hasattr(self, 'fc_btn_skip'):
+            self._style_action_btn(self.fc_btn_skip, "outline")
+        if hasattr(self, 'fc_btn_next'):
+            self._style_action_btn(self.fc_btn_next, "accent")
 
-        # Multiple Choice mode components
+        # ── Multiple Choice mode ─────────────────────────────────────────────
         if hasattr(self, 'mc_btn_stop') and self.mc_btn_stop:
-            self.mc_btn_stop.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: transparent;
-                    color: {c('error')};
-                    border: 1px solid {c('error')};
-                    border-radius: 18px;
-                    font-size: 12px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: {c('error_bg')};
-                }}
-            """)
+            self._style_action_btn(self.mc_btn_stop, "danger")
         if hasattr(self, 'mc_btn_reveal'):
-            self.mc_btn_reveal.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {c('success')};
-                    color: #FFFFFF;
-                    border: none;
-                    border-radius: 19px;
-                    font-size: 13px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: {c('success')};
-                }}
-                QPushButton:disabled {{
-                    background-color: {c('border')};
-                    color: {c('text_muted')};
-                }}
-            """)
+            self._style_action_btn(self.mc_btn_reveal, "success")
         if hasattr(self, 'mc_btn_skip'):
-            self.mc_btn_skip.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {c('accent')};
-                    color: #FFFFFF;
-                    border: none;
-                    border-radius: 19px;
-                    font-size: 13px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: {c('accent_hover')};
-                }}
-                QPushButton:disabled {{
-                    background-color: {c('border')};
-                    color: {c('text_muted')};
-                }}
-            """)
+            self._style_action_btn(self.mc_btn_skip, "outline")
+        if hasattr(self, 'mc_btn_next'):
+            self._style_action_btn(self.mc_btn_next, "accent")
         if hasattr(self, 'mc_mode_lbl'):
             self.mc_mode_lbl.setStyleSheet(f"color: {c('text_primary')};")
         if hasattr(self, 'mc_progress_pill'):
             self.mc_progress_pill.setStyleSheet(f"""
                 QFrame#mcProgressPill {{
-                    background-color: rgba(108, 99, 255, 30);
-                    border: 1px solid rgba(108, 99, 255, 70);
-                    border-radius: 12px;
+                    background-color: {c('info_bg')};
+                    border: 1px solid {c('welcome_border')};
+                    border-radius: 13px;
                 }}
             """)
         if hasattr(self, 'mc_progress_lbl'):
             self.mc_progress_lbl.setStyleSheet(
-                f"color: {c('accent')}; background: transparent; border: none;"
+                f"color: {c('welcome_title')}; background: transparent; border: none;"
             )
         if hasattr(self, 'mc_progress_bar'):
             self.mc_progress_bar.update()
         if hasattr(self, 'mc_question_lbl'):
             self.mc_question_lbl.setStyleSheet(f"""
-                color: {c('text_primary')};
-                background-color: rgba(108, 99, 255, 25);
-                border: 2px solid rgba(108, 99, 255, 60);
-                border-radius: 16px;
-                padding: 4px 16px;
+                color: {c('welcome_title')};
+                background-color: {c('info_bg')};
+                border: 1px solid {c('welcome_border')};
+                border-radius: 12px;
+                padding: 8px 16px;
             """)
 
-        # Side panel cards
-        side_card_style = f"""
+        # ── Side panel: metric cards (uniform pure-white surface) ────────────
+        metric_card_style = f"""
             QFrame {{
-                background-color: {c('input_bg')};
-                border: 1px solid {c('border')};
-                border-radius: 8px;
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('input_border')};
+                border-radius: 12px;
             }}
-            QLabel {{
-                background: transparent;
-                border: none;
-            }}
+            QLabel {{ background: transparent; border: none; }}
         """
-        self.side_correct_card.setStyleSheet(side_card_style)
-        self.side_missed_card.setStyleSheet(side_card_style)
-        self.side_accuracy_card.setStyleSheet(side_card_style)
+        # All session-score cards share the same neutral surface as the
+        # Current Streak card (uniform, no green/red tint on the background).
+        self.side_correct_card.setStyleSheet(metric_card_style)
+        self.side_missed_card.setStyleSheet(metric_card_style)
+        self.side_accuracy_card.setStyleSheet(metric_card_style)
 
         self.lbl_side_correct.setStyleSheet(f"color: {c('success')};")
         self.lbl_side_missed.setStyleSheet(f"color: {c('error')};")
         self.lbl_side_acc.setStyleSheet(f"color: {c('text_primary')};")
 
-        # Score sub-labels
-        for lbl in [self.lbl_correct_label, self.lbl_missed_label]:
-            lbl.setStyleSheet(f"color: {c('text_muted')};")
+        self.lbl_correct_label.setStyleSheet(f"color: {c('text_secondary')};")
+        self.lbl_missed_label.setStyleSheet(f"color: {c('text_secondary')};")
 
-        # Streak card
         self.streak_card.setStyleSheet(f"""
             QFrame#streakCard {{
-                background-color: {c('input_bg')};
-                border: 1px solid {c('border')};
-                border-radius: 8px;
+                background-color: {c('bg_primary')};
+                border: 1px solid {c('input_border')};
+                border-radius: 12px;
             }}
-            QLabel {{
-                background: transparent;
-                border: none;
-            }}
+            QLabel {{ background: transparent; border: none; }}
         """)
-
-        # Select active options update
 
         # Refresh repaint for circular ring
         self.results_ring.update()

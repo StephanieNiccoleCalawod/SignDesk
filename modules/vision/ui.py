@@ -240,7 +240,7 @@ class CameraPracticePage(BasePage):
         # Audio prompts toggle button (target letter announcements)
         from core.config import config as _cfg
         _audio_on = _cfg.get("accessibility.audio_prompts", True)
-        self.btn_audio = QPushButton("🔊 Audio On" if _audio_on else "🔇 Audio Off")
+        self.btn_audio = QPushButton("Audio On" if _audio_on else "Audio Off")
         self.btn_audio.setCheckable(True)
         self.btn_audio.setChecked(_audio_on)
         self.btn_audio.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -251,7 +251,7 @@ class CameraPracticePage(BasePage):
 
         # Speak Output toggle button (sentence TTS)
         _tts_on = _cfg.get("speech.tts_enabled", True)
-        self.btn_speak = QPushButton("🗣 Speak On" if _tts_on else "🔕 Speak Off")
+        self.btn_speak = QPushButton("Speak On" if _tts_on else "Speak Off")
         self.btn_speak.setCheckable(True)
         self.btn_speak.setChecked(_tts_on)
         self.btn_speak.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -573,14 +573,14 @@ class CameraPracticePage(BasePage):
         from core.config import config as _cfg
         _cfg.set("accessibility.audio_prompts", checked)
         _cfg.save()
-        self.btn_audio.setText("🔊 Audio On" if checked else "🔇 Audio Off")
+        self.btn_audio.setText("Audio On" if checked else "Audio Off")
         self.btn_audio.setStyleSheet(self._audio_btn_style(checked))
 
     def _on_speak_toggled(self, checked: bool) -> None:
         from core.config import config as _cfg
         _cfg.set("speech.tts_enabled", checked)
         _cfg.save()
-        self.btn_speak.setText("🗣 Speak On" if checked else "🔕 Speak Off")
+        self.btn_speak.setText("Speak On" if checked else "Speak Off")
         self.btn_speak.setStyleSheet(self._audio_btn_style(checked))
 
     def _build_webcam_placeholder(self) -> QWidget:

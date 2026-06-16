@@ -58,7 +58,7 @@ def _conf_badge(conf) -> tuple[str, str, str]:
 
 
 def _source_label(source: str) -> str:
-    return "📷 Camera" if source == "camera_practice" else "🃏 Flashcard"
+    return "Camera" if source == "camera_practice" else "Flashcard"
 
 
 class GestureHistorySection(QWidget):
