@@ -1,15 +1,4 @@
-"""
-Train Landmark-Based ASL Model for SignDesk
-============================================
-Trains a Dense neural network on hand landmark coordinates
-instead of images. Much more accurate and faster.
 
-Usage:
-    python training/train_landmark_model.py
-
-Prerequisites:
-    Run collect_landmarks.py first to generate training data.
-"""
 
 import os
 import json
